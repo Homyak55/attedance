@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '5.3.3';
+  var APP_VERSION = '5.3.4';
   var MONTHS = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
   var REASONS = [
     {key:'family', label:'По семейным', short:'сем.', respected:true},
@@ -75,6 +75,16 @@
     });
   }
   function activePairs() { return normalizePairs(state.settings.pairs); }
+  function weeklyPairs() { return activePairs().filter(function(p){ return p.number>=1 && p.number<=3; }); }
+  function scheduledPairNumbers(date) {
+    if(state.schedule.nonSchoolDays[date]) return [];
+    return activePairs().filter(function(p){ return !!actualSubjectId(date,p.id); }).map(function(p){ return p.number; });
+  }
+  function attendancePairsForDate(date, record) {
+    var list=scheduledPairNumbers(date);
+    if(record) list=list.concat(pairNumbersFromRecord(record));
+    return list.filter(function(n){return Number.isFinite(Number(n))&&Number(n)>=1&&Number(n)<=6;}).map(Number).filter(function(n,i,a){return a.indexOf(n)===i;}).sort(function(a,b){return a-b;});
+  }
   var WEEK_DAYS = [
     {index:1,name:'Понедельник',short:'Пн'},
     {index:2,name:'Вторник',short:'Вт'},
@@ -102,7 +112,7 @@
     var weekly={1:{},2:{},3:{},4:{},5:{},6:{}};
     for(var d=1;d<=6;d++){
       var src=schedule.weekly&&schedule.weekly[d] ? schedule.weekly[d] : {};
-      Object.keys(src).forEach(function(pairId){var subjectId=src[pairId];if(pairIds.has(pairId)&&subjectIds.has(subjectId))weekly[d][pairId]=subjectId;});
+      Object.keys(src).forEach(function(pairId){var subjectId=src[pairId];var pair=(pairs||[]).find(function(p){return p.id===pairId;});if(pair&&pair.number<=3&&pairIds.has(pairId)&&subjectIds.has(subjectId))weekly[d][pairId]=subjectId;});
     }
     var dateOverrides={};
     Object.keys(schedule.dateOverrides||{}).forEach(function(date){
@@ -131,7 +141,8 @@
     if(state.schedule.nonSchoolDays[date]) return null;
     var overrides=state.schedule.dateOverrides[date];
     if(overrides && Object.prototype.hasOwnProperty.call(overrides,pairId)) return overrides[pairId];
-    var wd=weekdayOfDate(date); return wd>=1&&wd<=6 ? (state.schedule.weekly[wd]||{})[pairId] || null : null;
+    var pair=activePairs().find(function(p){return p.id===pairId;});
+    var wd=weekdayOfDate(date); return pair&&pair.number<=3&&wd>=1&&wd<=6 ? (state.schedule.weekly[wd]||{})[pairId] || null : null;
   }
   function actualSubjectLabel(date,pairId) {
     var id=actualSubjectId(date,pairId), sub=id&&subjectById(id);
@@ -317,10 +328,12 @@
 
   function saveAttendance() {
     var m=state.modal; if (!m || m.type!=='attendance') return;
-    var selected=(m.pairs||[]).map(Number).filter(function(n){return activePairs().some(function(p){return p.number===n;});}).filter(function(n,i,a){return a.indexOf(n)===i;}).sort(function(a,b){return a-b;});
+    var allowed=new Set(attendancePairsForDate(m.date,currentRecord(m.studentId,m.date)));
+    var selected=(m.pairs||[]).map(Number).filter(function(n){return allowed.has(n);}).filter(function(n,i,a){return a.indexOf(n)===i;}).sort(function(a,b){return a-b;});
+    var scheduled=scheduledPairNumbers(m.date);
     var existing=state.absences.filter(function(a){return !(a.studentId===m.studentId && a.date===m.date);});
-    if (selected.length) existing.push({studentId:m.studentId,date:m.date,pairs:selected,periods:selected,hours:hoursFromPairs(selected),allDay:selected.length===activePairs().length,reason:m.reason});
-    state.absences=normalizeAbsences(existing,state.students); state.modal=null; persistNow(); render(); toast(selected.length ? (selected.length===activePairs().length ? 'НБ сохранена: весь день' : 'НБ сохранена: '+selected.length+' '+(selected.length===1?'пара':'пары')+' · '+hoursFromPairs(selected)+' ч.') : 'НБ снята');
+    if (selected.length) existing.push({studentId:m.studentId,date:m.date,pairs:selected,periods:selected,hours:hoursFromPairs(selected),allDay:scheduled.length>0&&selected.length===scheduled.length,reason:m.reason});
+    state.absences=normalizeAbsences(existing,state.students); state.modal=null; persistNow(); render(); toast(selected.length ? (scheduled.length>0&&selected.length===scheduled.length ? 'НБ сохранена: весь день' : 'НБ сохранена: '+selected.length+' '+(selected.length===1?'пара':'пары')+' · '+hoursFromPairs(selected)+' ч.') : 'НБ снята');
   }
   function removeAttendance() {
     var m=state.modal; if (!m) return;
@@ -552,7 +565,7 @@
       return '<div class="page-card"><h3>История по предмету</h3><p>Для каждой даты показывается, кто отсутствовал на выбранном предмете. Если НБ нет — так и указано. Разовые замены учитываются.</p>'+controls+dateControls+subjectControl+'<div class="field"><label>Студент</label><select id="historyStudent"><option value="all">Все студенты</option>'+state.students.map(function(s){return '<option value="'+esc(s.id)+'" '+(state.historyStudentId===s.id?'selected':'')+'>'+esc(s.name)+'</option>';}).join('')+'</select></div></div><div class="page-card">'+subjectRows+'</div>';
     }
 
-    var countText=state.historyMode==='pair' ? 'Записи за '+monthTitle(state.historyMonth)+' по выбранной паре.' : 'Смотри историю как по месяцу, по конкретному дню или по номеру пары.';
+    var countText=state.historyMode==='pair' ? 'Записи за '+monthTitle(state.historyMonth)+' по выбранной паре.' : 'Смотри историю как по месяцу, по конкретному дню или по названию предмета.';
     var rows=[];
     records.forEach(function(a){
       var pairs=pairNumbersFromRecord(a);
@@ -574,7 +587,7 @@
     return '<div class="page-card"><h3>Резервная копия</h3><p>В backup входят группа, весь список студентов, вся история НБ за все годы, отчёты, пары и расписание.</p><div class="toolbar"><button class="btn primary" data-action="export-backup">⬇ Создать backup</button><button class="btn" data-action="import-backup">⬆ Восстановить backup</button></div><div class="footer-note">Размер текущих данных примерно '+size+' КБ. После создания файла его можно сохранить в «Файлы» на iPhone.</div></div>'+exportReadyHtml()+'<div class="page-card"><h3>Надёжность хранения</h3><p>Основное хранилище — IndexedDB. Дополнительно приложение держит локальную копию состояния и запрашивает persistent storage, когда браузер это поддерживает. Backup остаётся отдельной независимой копией.</p></div>';
   }
   function renderSchedule() {
-    var pairs=activePairs(), subjects=state.schedule.subjects;
+    var pairs=activePairs(), weekPairs=weeklyPairs(), subjects=state.schedule.subjects;
     var optionHtml=function(selected,allowBase){
       var out=allowBase?'<option value="__weekly__" '+(selected==='__weekly__'?'selected':'')+'>По недельному расписанию</option>':'';
       out+='<option value="__none__" '+(selected==='__none__'?'selected':'')+'>Нет занятия</option>';
@@ -583,7 +596,7 @@
     };
     var subjectRows=subjects.map(function(s){return '<div class="subject-row" data-subject-row data-subject-id="'+esc(s.id)+'"><div class="field"><label>Занятие</label><input data-subject-name value="'+esc(s.name)+'" placeholder="Например, Математика"></div><div class="field"><label>Преподаватель</label><input data-subject-teacher value="'+esc(s.teacher||'')+'" placeholder="Необязательно"></div><button class="btn small danger" data-action="delete-subject" data-subject-id="'+esc(s.id)+'">Удалить</button></div>';}).join('');
     var weekDays=WEEK_DAYS.map(function(day){
-      var slots=pairs.map(function(p){var value=weeklySubjectId(day.index,p.id);return '<div class="schedule-slot"><div class="schedule-slot-head"><strong>'+esc(schedulePairLabel(p))+'</strong></div><select data-week-slot data-weekday="'+day.index+'" data-pair-id="'+esc(p.id)+'"><option value="">Нет занятия</option>'+subjects.map(function(s){return '<option value="'+esc(s.id)+'" '+(value===s.id?'selected':'')+'>'+esc(s.name+(s.teacher?' · '+s.teacher:''))+'</option>';}).join('')+'</select></div>';}).join('');
+      var slots=weekPairs.map(function(p){var value=weeklySubjectId(day.index,p.id);return '<div class="schedule-slot"><div class="schedule-slot-head"><strong>'+esc(schedulePairLabel(p))+'</strong></div><select data-week-slot data-weekday="'+day.index+'" data-pair-id="'+esc(p.id)+'"><option value="">Нет занятия</option>'+subjects.map(function(s){return '<option value="'+esc(s.id)+'" '+(value===s.id?'selected':'')+'>'+esc(s.name+(s.teacher?' · '+s.teacher:''))+'</option>';}).join('')+'</select></div>';}).join('');
       return '<div class="week-day"><h4>'+esc(day.name)+'</h4>'+slots+'</div>';
     }).join('');
     var date=state.scheduleDate||today(),isOff=!!state.schedule.nonSchoolDays[date],overrides=state.schedule.dateOverrides[date]||{};
@@ -591,7 +604,7 @@
       var override=Object.prototype.hasOwnProperty.call(overrides,p.id), value=override?(overrides[p.id]===null?'__none__':overrides[p.id]):'__weekly__';
       return '<div class="schedule-day-row"><div class="schedule-pair-info"><strong>'+esc(schedulePairLabel(p))+'</strong><small>'+esc(actualSubjectLabel(date,p.id))+'</small></div><select data-day-slot data-pair-id="'+esc(p.id)+'" '+(isOff?'disabled':'')+'>'+optionHtml(value,true)+'</select></div>';
     }).join('');
-    return '<div class="page-card"><h3>Все занятия</h3><p>Здесь хранится библиотека предметов и занятий. Она не показывается на главном экране.</p><div class="subjects-list">'+(subjectRows||'<div class="empty">Добавь первое занятие.</div>')+'</div><div class="toolbar"><button class="btn" data-action="add-subject">＋ Добавить занятие</button><button class="btn primary" data-action="save-subjects">Сохранить занятия</button></div></div><div class="page-card"><h3>Недельное расписание</h3><p>Всегда доступно 6 пар — с понедельника по субботу. Если занятие не назначено, оставь «Нет занятия». Изменения конкретной даты ниже не меняют недельный шаблон.</p><div class="week-grid">'+weekDays+'</div><div class="toolbar"><button class="btn primary" data-action="save-weekly">Сохранить неделю</button></div></div><div class="page-card"><h3>Изменить конкретный день</h3><p>Здесь можно объявить день выходным или заменить каждую из 6 пар только на выбранную дату.</p><div class="month-row"><button class="btn small" data-action="schedule-date-shift" data-by="-1">‹</button><div class="month-caption">'+esc(formatDate(date))+'</div><button class="btn small" data-action="schedule-date-shift" data-by="1">›</button><input id="scheduleDateInput" type="date" value="'+esc(date)+'"></div><label class="toggle-line"><input id="scheduleNonSchool" type="checkbox" '+(isOff?'checked':'')+'> <span><strong>Выходной / занятий нет</strong></span></label><div class="schedule-day-list">'+dayRows+'</div><div class="toolbar"><button class="btn primary" data-action="save-schedule-day">Сохранить день</button><button class="btn ghost" data-action="reset-schedule-day">Сбросить изменения дня</button></div></div>';
+    return '<div class="page-card"><h3>Все занятия</h3><p>Здесь хранится библиотека предметов и занятий. Она не показывается на главном экране.</p><div class="subjects-list">'+(subjectRows||'<div class="empty">Добавь первое занятие.</div>')+'</div><div class="toolbar"><button class="btn" data-action="add-subject">＋ Добавить занятие</button><button class="btn primary" data-action="save-subjects">Сохранить занятия</button></div></div><div class="page-card"><h3>Недельное расписание</h3><p>В обычной неделе — максимум 3 пары на день, с понедельника по субботу. Если пары нет, оставь «Нет занятия». Изменения конкретной даты ниже не меняют недельный шаблон.</p><div class="week-grid">'+weekDays+'</div><div class="toolbar"><button class="btn primary" data-action="save-weekly">Сохранить неделю</button></div></div><div class="page-card"><h3>Изменить конкретный день</h3><p>Для выбранной даты можно заменить занятия, отменить их или добавить дополнительные 4–6 пары. Эти изменения действуют только на эту дату.</p><div class="month-row"><button class="btn small" data-action="schedule-date-shift" data-by="-1">‹</button><div class="month-caption">'+esc(formatDate(date))+'</div><button class="btn small" data-action="schedule-date-shift" data-by="1">›</button><input id="scheduleDateInput" type="date" value="'+esc(date)+'"></div><label class="toggle-line"><input id="scheduleNonSchool" type="checkbox" '+(isOff?'checked':'')+'> <span><strong>Выходной / занятий нет</strong></span></label><div class="schedule-day-list">'+dayRows+'</div><div class="toolbar"><button class="btn primary" data-action="save-schedule-day">Сохранить день</button><button class="btn ghost" data-action="reset-schedule-day">Сбросить изменения дня</button></div></div>';
   }
   function renderSettings() {
     return '<div class="page-card"><h3>Внешний вид</h3><div class="field"><label>Тема</label><select id="themeSelect"><option value="light" '+(state.settings.theme==='light'?'selected':'')+'>Светлая</option><option value="dark" '+(state.settings.theme==='dark'?'selected':'')+'>Тёмная</option><option value="system" '+(state.settings.theme==='system'?'selected':'')+'>Как в системе</option></select></div><p class="theme-note">Тёмная тема переработана для текста, полей, таблиц, кнопок и окон.</p></div><div class="page-card"><h3>Установка на iPhone</h3><p>Открой приложение в Safari → Поделиться → «На экран Домой» → «Открыть как веб‑приложение» → Добавить.</p><div class="toolbar"><button class="btn" data-action="show-install">Показать инструкцию</button></div></div><div class="page-card"><h3>О приложении</h3><p>Версия '+APP_VERSION+'. PWA без аккаунтов и без сервера для хранения посещаемости.</p></div>';
@@ -604,9 +617,10 @@
     if (!state.modal) return '';
     var m=state.modal;
     if(m.type==='student') return '<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>'+ (m.studentId?'Изменить студента':'Новый студент') +'</h3><button class="modal-close" data-action="close-modal">✕</button></div><div class="field"><label>ФИО</label><input id="studentNameInput" value="'+esc(m.name)+'" autocomplete="off"></div><div class="modal-actions"><button class="btn ghost" data-action="close-modal">Отмена</button><button class="btn primary" data-action="save-student">Сохранить</button></div></div></div>';
-    var existing=!!currentRecord(m.studentId,m.date), pairs=activePairs(), selected=new Set((m.pairs||[]).map(Number));
+    var record=currentRecord(m.studentId,m.date), existing=!!record, pairs=activePairs().filter(function(p){ return attendancePairsForDate(m.date,record).indexOf(p.number)>=0; }), scheduled=scheduledPairNumbers(m.date), selected=new Set((m.pairs||[]).map(Number));
     var pairChoices=pairs.map(function(p){var active=selected.has(p.number);var sub=[p.start&&p.end?p.start+'–'+p.end:'',actualSubjectLabel(m.date,p.id)].filter(Boolean).join(' · ');return '<button class="pair-choice '+(active?'active':'')+'" data-action="toggle-pair" data-pair="'+esc(p.number)+'"><span class="pair-number">'+esc(p.number)+'</span><span><strong>'+esc(p.number+' пара')+'</strong><small>'+esc(sub||'НБ за эту пару')+'</small></span></button>';}).join('');
-    return '<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>'+esc(studentName(m.studentId))+'</h3><button class="modal-close" data-action="close-modal">✕</button></div><div class="field"><label>Дата</label><input id="attendanceDate" type="date" value="'+esc(m.date)+'"></div><div class="field"><label>Пропущенные пары · '+esc(hoursFromPairs(m.pairs||[]))+' ч.</label><div class="pair-choice-grid">'+pairChoices+'</div><div class="toolbar"><button class="btn small" data-action="select-all-pairs">Весь день</button><button class="btn small ghost" data-action="clear-pairs">Снять все</button></div></div><div class="field"><label>Причина</label><div class="reason-list">'+REASONS.map(function(r){return '<button class="reason '+(m.reason===r.key?'active':'')+'" data-action="set-reason" data-reason="'+r.key+'"><span class="radio"></span><span><strong>'+esc(r.label)+'</strong><br><small>'+(r.respected?'Попадёт в «уважит.»':'Попадёт в «неув.»')+'</small></span></button>';}).join('')+'</div></div><div class="modal-actions">'+(existing?'<button class="btn danger" data-action="remove-attendance">Снять НБ</button>':'')+'<button class="btn primary" data-action="save-attendance">'+((m.pairs||[]).length?'Сохранить НБ':'Сохранить')+'</button></div></div></div>';
+    var pairHint=scheduled.length ? '' : '<div class="empty">На эту дату по расписанию занятий нет.</div>';
+    return '<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>'+esc(studentName(m.studentId))+'</h3><button class="modal-close" data-action="close-modal">✕</button></div><div class="field"><label>Дата</label><input id="attendanceDate" type="date" value="'+esc(m.date)+'"></div><div class="field"><label>Пропущенные пары · '+esc(hoursFromPairs(m.pairs||[]))+' ч.</label>'+pairHint+'<div class="pair-choice-grid">'+pairChoices+'</div><div class="toolbar"><button class="btn small" data-action="select-all-pairs">Весь день</button><button class="btn small ghost" data-action="clear-pairs">Снять все</button></div></div><div class="field"><label>Причина</label><div class="reason-list">'+REASONS.map(function(r){return '<button class="reason '+(m.reason===r.key?'active':'')+'" data-action="set-reason" data-reason="'+r.key+'"><span class="radio"></span><span><strong>'+esc(r.label)+'</strong><br><small>'+(r.respected?'Попадёт в «уважит.»':'Попадёт в «неув.»')+'</small></span></button>';}).join('')+'</div></div><div class="modal-actions">'+(existing?'<button class="btn danger" data-action="remove-attendance">Снять НБ</button>':'')+'<button class="btn primary" data-action="save-attendance">'+((m.pairs||[]).length?'Сохранить НБ':'Сохранить')+'</button></div></div></div>';
   }
   function renderApp() {
     var body=state.screen==='home'?renderHome():state.screen==='report'?renderReport():state.screen==='history'?renderHistory():state.screen==='schedule'?renderSchedule():state.screen==='group'?renderGroup():state.screen==='backup'?renderBackup():renderSettings();
@@ -624,7 +638,7 @@
     if(action==='attendance'){openAttendance(el.dataset.student,today());return;}
     if(action==='close-modal'){state.modal=null;render();return;}
     if(action==='toggle-pair'){if(state.modal){var n=Number(el.dataset.pair), set=new Set(state.modal.pairs||[]);if(set.has(n))set.delete(n);else set.add(n);state.modal.pairs=Array.from(set).sort(function(a,b){return a-b;});state.modal.hours=hoursFromPairs(state.modal.pairs);render();}return;}
-    if(action==='select-all-pairs'){if(state.modal){state.modal.pairs=activePairs().map(function(p){return p.number;});state.modal.hours=hoursFromPairs(state.modal.pairs);render();}return;}
+    if(action==='select-all-pairs'){if(state.modal){state.modal.pairs=scheduledPairNumbers(state.modal.date);state.modal.hours=hoursFromPairs(state.modal.pairs);render();}return;}
     if(action==='clear-pairs'){if(state.modal){state.modal.pairs=[];state.modal.hours=0;render();}return;}
     if(action==='set-reason'){if(state.modal){state.modal.reason=el.dataset.reason;render();}return;}
     if(action==='save-attendance'){saveAttendance();return;}

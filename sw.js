@@ -1,4 +1,4 @@
-const CACHE = 'attendance-journal-v5.3.3';
+const CACHE = 'attendance-journal-v5.3.4';
 const ASSETS = [
   './',
   './index.html',
