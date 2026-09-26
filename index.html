@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Посещаемость">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <title>Посещаемость</title>
+</head>
+<body>
+  <div id="app">
+    <div class="boot-screen">
+      <div class="boot-card"><strong>Посещаемость</strong><span>Запуск приложения…</span></div>
+    </div>
+  </div>
+  <input id="backupFile" type="file" accept="application/json,.json" hidden>
+  <script>
+    window.addEventListener('error', function (event) {
+      var box = document.getElementById('app');
+      if (box && !box.dataset.started) {
+        box.innerHTML = '<div class="boot-screen"><div class="boot-card error"><strong>Ошибка запуска</strong><span>' + String(event.message || 'Неизвестная ошибка') + '</span></div></div>';
+      }
+    });
+    window.addEventListener('unhandledrejection', function (event) {
+      var message = event && event.reason ? (event.reason.message || String(event.reason)) : 'Необработанная ошибка';
+      var box = document.getElementById('app');
+      if (box && !box.dataset.started) {
+        box.innerHTML = '<div class="boot-screen"><div class="boot-card error"><strong>Ошибка запуска</strong><span>' + message.replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }) + '</span></div></div>';
+      }
+    });
+  </script>
+  <script src="js/storage.js" defer></script>
+  <script src="js/exporter.js" defer></script>
+  <script src="js/docx.js" defer></script>
+  <script src="js/app.js" defer></script>
+</body>
+</html>
