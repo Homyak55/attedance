@@ -222,5 +222,67 @@
     return zipStore(packageFiles);
   }
 
-  window.AttendanceDocx = { buildAttendanceDocx: build, mimeType: MIME };
+
+  function buildMultiChildDocx(group, students, absences, schedule, monthKey) {
+    var parts = String(monthKey || '').split('-');
+    var year = Number(parts[0]), month = Number(parts[1]);
+    if (!year || month < 1 || month > 12) throw new Error('Некорректный месяц');
+    var days = daysInMonth(year, month);
+    var nonSchool = (schedule && schedule.nonSchoolDays) || {};
+    var byStudent = new Map();
+    (absences || []).forEach(function(a){
+      if (!String(a.date).startsWith(monthKey + '-')) return;
+      var list = byStudent.get(a.studentId) || []; list.push(a); byStudent.set(a.studentId, list);
+    });
+    function isOff(day) {
+      var date = monthKey + '-' + String(day).padStart(2, '0');
+      return dayOfWeek(year, month, day) === 0 || !!nonSchool[date];
+    }
+    function pairNumbers(record) {
+      var list = Array.isArray(record && record.pairs) ? record.pairs : (Array.isArray(record && record.periods) ? record.periods : []);
+      return list.map(Number).filter(function(n){return Number.isFinite(n)&&n>=1&&n<=6;}).filter(function(n,i,a){return a.indexOf(n)===i;});
+    }
+    /* Geometry copied from the supplied multichild template: one wide name column, 31 day columns, 3 totals. */
+    var nameW=3120;
+    var dayWidths=[296,296,296,296,296,296,296,296,296,376,376,376,376,376,376,376,376,376,376,376,376,376,376,376,376,392,425,426,425,425,283];
+    var totalW=709, notFedW=708, fedW=709;
+    var dayTotal=dayWidths.reduce(function(a,b){return a+b;},0);
+    var tableW=nameW+dayTotal+totalW+notFedW+fedW;
+    var borders='<w:tblBorders><w:top w:val="single" w:sz="8"/><w:left w:val="single" w:sz="8"/><w:bottom w:val="single" w:sz="8"/><w:right w:val="single" w:sz="8"/><w:insideH w:val="single" w:sz="4"/><w:insideV w:val="single" w:sz="4"/></w:tblBorders>';
+    var tblPr='<w:tblPr><w:tblW w:w="'+tableW+'" w:type="dxa"/><w:jc w:val="center"/><w:tblLayout w:type="fixed"/>'+borders+'</w:tblPr>';
+    var widths=[nameW].concat(dayWidths,[totalW,notFedW,fedW]);
+    var grid='<w:tblGrid>'+widths.map(function(w){return '<w:gridCol w:w="'+w+'"/>';}).join('')+'</w:tblGrid>';
+    var h1='<w:tr><w:trPr><w:trHeight w:val="720" w:hRule="exact"/><w:cantSplit/></w:trPr>'+cell('ФИО студента',nameW,{bold:true,size:18})+cell('Числа месяца',dayTotal,{bold:true,size:18,gridSpan:31})+cell('ВСЕГО ДНЕЙ в МЕСЯЦЕ\n(без выходных)',totalW,{bold:true,size:15})+cell('ВСЕГО НЕ ПИТАЛСЯ',notFedW,{bold:true,size:15})+cell('ВСЕГО ПИТАЛСЯ',fedW,{bold:true,size:15})+'</w:tr>';
+    var h2='<w:tr><w:trPr><w:trHeight w:val="330" w:hRule="exact"/><w:cantSplit/></w:trPr>'+cell('',nameW)+Array.from({length:31},function(_,i){var d=i+1,off=d<=days&&isOff(d);return cell(d<=days?String(d):'',dayWidths[i],{bold:true,size:15,fill:off?'B91C1C':undefined,white:off});}).join('')+cell('',totalW)+cell('',notFedW)+cell('',fedW)+'</w:tr>';
+    var rows=[];
+    (students||[]).forEach(function(student,index){
+      var map=new Map((byStudent.get(student.id)||[]).map(function(a){return [Number(String(a.date).slice(-2)),a];}));
+      var fed=0,not=0,school=0;
+      var dayCells=Array.from({length:31},function(_,idx){
+        var d=idx+1; if(d>days)return cell('',dayWidths[idx],{size:14});
+        if(isOff(d))return cell('',dayWidths[idx],{fill:'FECACA',size:14});
+        school++; var record=map.get(d);
+        var absentAllDay=!!(record&&record.allDay);
+        if(record&&!absentAllDay&&Number(record.scheduledPairsCount)>0){
+          absentAllDay=pairNumbers(record).length>=Number(record.scheduledPairsCount);
+        }
+        if(absentAllDay){not++;return cell('-',dayWidths[idx],{bold:true,size:17});}
+        fed++;return cell('+',dayWidths[idx],{bold:true,size:17});
+      }).join('');
+      rows.push('<w:tr><w:trPr><w:trHeight w:val="340" w:hRule="exact"/><w:cantSplit/></w:trPr>'+cell(String(index+1)+'. '+student.name,nameW,{size:15,align:'left'})+dayCells+cell(String(school),totalW,{bold:true,size:15})+cell(String(not),notFedW,{bold:true,size:15})+cell(String(fed),fedW,{bold:true,size:15})+'</w:tr>');
+    });
+    var table='<w:tbl>'+tblPr+grid+h1+h2+rows.join('')+'</w:tbl>';
+    var institution=group.institution||'', short=group.institutionShort?'\n('+group.institutionShort+')':'', monthName=MONTHS[month-1];
+    var details=paragraph(run('группа  ',{size:18})+run(group.group||'',{size:18,underline:true})+run('   месяц ',{size:18})+run(monthName+' '+year,{size:18,underline:true})+run(' год',{size:18}),{align:'center',after:210,line:220});
+    var doc='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'+paragraph(run(institution+short,{size:20}),{align:'center',after:20,line:220,keepNext:true})+paragraph(run('ВЕДОМОСТЬ',{bold:true,size:24}),{align:'center',after:0,line:220,keepNext:true})+paragraph(run('учета студентов, посещающих учебные занятия и принимающих горячее питание из многодетных семей',{bold:true,size:20}),{align:'center',after:120,line:220,keepNext:true})+details+table+paragraph(run('Ответственный за питание    ___________________', {size:18}),{before:240,after:30,line:220})+'<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="240" w:right="720" w:bottom="270" w:left="720" w:header="0" w:footer="0" w:gutter="0"/><w:cols w:num="1"/></w:sectPr></w:body></w:document>';
+    var styles='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:sz w:val="20"/></w:rPr></w:style></w:styles>';
+    var settings='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:zoom w:percent="80"/></w:settings>';
+    var contentTypes='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>';
+    var rootRels='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>';
+    var docRels='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/></Relationships>';
+    var core='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"><dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">Ведомость многодетные '+esc(monthKey)+'</dc:title><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">AttendanceJournal</dc:creator></cp:coreProperties>';
+    return zipStore([{name:'[Content_Types].xml',data:bytes(contentTypes)},{name:'_rels/.rels',data:bytes(rootRels)},{name:'word/document.xml',data:bytes(doc)},{name:'word/styles.xml',data:bytes(styles)},{name:'word/settings.xml',data:bytes(settings)},{name:'word/_rels/document.xml.rels',data:bytes(docRels)},{name:'docProps/core.xml',data:bytes(core)}]);
+  }
+
+  window.AttendanceDocx = { buildAttendanceDocx: build, buildMultiChildDocx: buildMultiChildDocx, mimeType: MIME };
 })();
