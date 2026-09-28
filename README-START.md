@@ -1,4 +1,4 @@
-# AttendanceJournal PWA V5.4.1
+# AttendanceJournal PWA V5.4.4
 
 Открыть `index.html` через Netlify/GitHub Pages или локальный статический сервер.
 

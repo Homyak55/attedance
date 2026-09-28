@@ -49,3 +49,10 @@
   .modal-actions{flex-wrap:nowrap}
   .modal-actions .btn{min-width:0}
 }
+/* V5.4.3: attendance modal structural fix + iPhone 14 layout */
+.modal-backdrop{box-sizing:border-box;width:100%;height:100dvh;min-height:100%;padding:12px;overflow-y:auto;overflow-x:hidden;align-items:center;justify-content:center}
+.modal{box-sizing:border-box;width:min(680px,calc(100vw - 24px));max-width:680px;min-width:0;max-height:calc(100dvh - 24px);margin:0;border-radius:22px;overflow-x:hidden;overflow-y:auto}
+.modal .field,.modal .pair-choice-grid,.modal .reason-grid,.modal .toolbar,.modal .modal-head{min-width:0;max-width:100%}
+.sticky-actions{position:sticky;bottom:0;margin:16px -14px -16px;padding:12px 14px calc(8px + env(safe-area-inset-bottom));background:var(--surface);z-index:5;box-shadow:0 -8px 18px rgba(15,23,42,.10)}
+.modal-actions .btn{min-width:0}
+@media(max-width:520px){.modal{width:calc(100vw - 24px);max-width:calc(100vw - 24px);padding-left:14px;padding-right:14px}.reason-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.reason-grid .reason{min-width:0;padding:8px 4px}.reason-grid .reason span{font-size:10px;overflow-wrap:anywhere}.pair-choice-grid{grid-template-columns:1fr}.sticky-actions{margin-left:-14px;margin-right:-14px;padding-left:14px;padding-right:14px}}

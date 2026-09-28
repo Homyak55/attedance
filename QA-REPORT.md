@@ -1,4 +1,4 @@
-# QA report — V5.4.1
+# QA report — V5.4.4
 
 - JS syntax: PASS (`app.js`, `docx.js`, `storage.js`, `exporter.js`).
 - Multi-child DOCX generation: PASS.
@@ -12,3 +12,6 @@
 - Multi-child status persists through student edit and backup snapshot: PASS (static code check).
 
 Interactive Safari/iPhone testing is still recommended before production deployment.
+
+- Legacy absence normalization: PASS (pairs constrained to 1–6; hour-only records restored up to 6 pairs).
+- Backup load order: PASS (imported pair configuration is applied before absence normalization).

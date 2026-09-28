@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '5.4.1';
+  var APP_VERSION = '5.4.4';
   var MONTHS = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
   var REASONS = [
     {key:'family', label:'По семейным', short:'сем.', respected:true},
@@ -176,12 +176,12 @@
     return pairNumbersFromRecord(record).filter(function(n){return subjectPairNumbers.has(n);});
   }
   function pairNumbersFromRecord(record) {
-    var list=Array.isArray(record&&record.pairs)?record.pairs.map(Number).filter(function(n){return Number.isFinite(n)&&n>=1;}).filter(function(n,i,a){return a.indexOf(n)===i;}).sort(function(a,b){return a-b;}):[];
+    var list=Array.isArray(record&&record.pairs)?record.pairs.map(Number).filter(function(n){return Number.isFinite(n)&&n>=1&&n<=6;}).filter(function(n,i,a){return a.indexOf(n)===i;}).sort(function(a,b){return a-b;}):[];
     if(!list.length && Array.isArray(record&&record.periods)) list=record.periods.map(Number).filter(function(n){return n>=1&&n<=20;}).filter(function(n,i,a){return a.indexOf(n)===i;}).sort(function(a,b){return a-b;});
     if(!list.length && Number(record&&record.hours)>0) list=hoursToPeriods(Number(record.hours));
     return list;
   }
-  function hoursToPeriods(hours) { if (hours >= 6) return [1,2,3]; if (hours >= 4) return [1,2]; if (hours >= 2) return [1]; return []; }
+  function hoursToPeriods(hours) { var count=Math.min(6,Math.max(0,Math.floor(Number(hours)/2))); return Array.from({length:count},function(_,i){return i+1;}); }
   function hoursFromPairs(pairs) { return (Array.isArray(pairs)?pairs.length:0)*2; }
   function pairLabel(number) { var p=activePairs().find(function(x){return x.number===Number(number);}); return p ? (p.start&&p.end ? number+' пара · '+p.start+'–'+p.end : number+' пара') : number+' пара'; }
   function normalizeGroup(value) {
@@ -238,12 +238,12 @@
   function normalizeLoadedData(data) {
     var students = normalizeStudents(data && data.students);
     if (!students.length) students = templateStudents();
-    var absences = normalizeAbsences(data && data.absences, students);
     var reports = Array.isArray(data && data.reports) ? data.reports.filter(function(r){return r && /^\d{4}-\d{2}$/.test(r.monthKey);}) : [];
     var pairs=normalizePairs(data && data.settings && data.settings.pairs);
-    state.students=students; state.absences=absences; state.group=normalizeGroup(data && data.group);
+    state.students=students; state.group=normalizeGroup(data && data.group);
     state.reports=reports; state.settings={theme:['light','dark','system'].indexOf(data && data.settings && data.settings.theme)>=0 ? data.settings.theme : 'light',pairs:pairs};
     state.schedule=normalizeSchedule(data && data.schedule,pairs);
+    state.absences=normalizeAbsences(data && data.absences, students);
   }
 
   async function loadData() {
@@ -631,7 +631,7 @@
     var record=currentRecord(m.studentId,m.date), existing=!!record, pairs=activePairs().filter(function(p){ return attendancePairsForDate(m.date,record).indexOf(p.number)>=0; }), scheduled=scheduledPairNumbers(m.date), selected=new Set((m.pairs||[]).map(Number));
     var pairChoices=pairs.map(function(p){var active=selected.has(p.number);var sub=[p.start&&p.end?p.start+'–'+p.end:'',actualSubjectLabel(m.date,p.id)].filter(Boolean).join(' · ');return '<button class="pair-choice '+(active?'active':'')+'" data-action="toggle-pair" data-pair="'+esc(p.number)+'"><span class="pair-number">'+esc(p.number)+'</span><span><strong>'+esc(p.number+' пара')+'</strong><small>'+esc(sub||'НБ за эту пару')+'</small></span></button>';}).join('');
     var pairHint=scheduled.length ? '' : '<div class="empty">На эту дату по расписанию занятий нет.</div>';
-    return '<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>'+esc(studentName(m.studentId))+'</h3><button class="modal-close" data-action="close-modal">✕</button></div><div class="field"><label>Дата</label><input id="attendanceDate" type="date" value="'+esc(m.date)+'"></div><div class="field"><label>Пропущенные пары · '+esc(hoursFromPairs(m.pairs||[]))+' ч.</label>'+pairHint+'<div class="pair-choice-grid">'+pairChoices+'</div><div class="toolbar"><button class="btn small" data-action="select-all-pairs">Весь день</button><button class="btn small ghost" data-action="clear-pairs">Снять все</button></div></div><div class="field"><label>Причина</label><div class="reason-grid"><button class="reason '+(m.reason==='family'?'active':'')+'" data-action="set-reason" data-reason="family"><strong>С</strong><span>Семейные обстоятельства</span></button><button class="reason '+(m.reason==='sick'?'active':'')+'" data-action="set-reason" data-reason="sick"><strong>Б</strong><span>Болезнь</span></button><button class="reason '+(m.reason==='order'?'active':'')+'" data-action="set-reason" data-reason="order"><strong>Р</strong><span>Распоряжение</span></button><button class="reason reason-none '+(m.reason==='none'?'active':'')+'" data-action="set-reason" data-reason="none"><strong>Неув</strong><span>Без причины</span></button></div></div></div><div class="modal-actions sticky-actions">'+(existing?'<button class="btn danger" data-action="remove-attendance">Снять НБ</button>':'')+'<button class="btn primary" data-action="save-attendance">'+((m.pairs||[]).length?'Сохранить НБ':'Сохранить')+'</button></div></div></div>';
+    return '<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>'+esc(studentName(m.studentId))+'</h3><button class="modal-close" data-action="close-modal">✕</button></div><div class="field"><label>Дата</label><input id="attendanceDate" type="date" value="'+esc(m.date)+'"></div><div class="field"><label>Пропущенные пары · '+esc(hoursFromPairs(m.pairs||[]))+' ч.</label>'+pairHint+'<div class="pair-choice-grid">'+pairChoices+'</div><div class="toolbar"><button class="btn small" data-action="select-all-pairs">Весь день</button><button class="btn small ghost" data-action="clear-pairs">Снять все</button></div></div><div class="field"><label>Причина</label><div class="reason-grid"><button class="reason '+(m.reason==='family'?'active':'')+'" data-action="set-reason" data-reason="family"><strong>С</strong><span>Семейные обстоятельства</span></button><button class="reason '+(m.reason==='sick'?'active':'')+'" data-action="set-reason" data-reason="sick"><strong>Б</strong><span>Болезнь</span></button><button class="reason '+(m.reason==='order'?'active':'')+'" data-action="set-reason" data-reason="order"><strong>Р</strong><span>Распоряжение</span></button><button class="reason reason-none '+(m.reason==='none'?'active':'')+'" data-action="set-reason" data-reason="none"><strong>Неув</strong><span>Без причины</span></button></div></div><div class="modal-actions sticky-actions">'+(existing?'<button class="btn danger" data-action="remove-attendance">Снять НБ</button>':'')+'<button class="btn primary" data-action="save-attendance">'+((m.pairs||[]).length?'Сохранить НБ':'Сохранить')+'</button></div></div></div>';
   }
   function renderApp() {
     var body=state.screen==='home'?renderHome():state.screen==='report'?renderReport():state.screen==='history'?renderHistory():state.screen==='schedule'?renderSchedule():state.screen==='group'?renderGroup():state.screen==='backup'?renderBackup():renderSettings();
