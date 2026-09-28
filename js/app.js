@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '5.4.4';
+  var APP_VERSION = '5.4.5';
   var MONTHS = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
   var REASONS = [
     {key:'family', label:'По семейным', short:'сем.', respected:true},

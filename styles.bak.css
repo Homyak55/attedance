@@ -56,26 +56,3 @@
 .sticky-actions{position:sticky;bottom:0;margin:16px -14px -16px;padding:12px 14px calc(8px + env(safe-area-inset-bottom));background:var(--surface);z-index:5;box-shadow:0 -8px 18px rgba(15,23,42,.10)}
 .modal-actions .btn{min-width:0}
 @media(max-width:520px){.modal{width:calc(100vw - 24px);max-width:calc(100vw - 24px);padding-left:14px;padding-right:14px}.reason-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.reason-grid .reason{min-width:0;padding:8px 4px}.reason-grid .reason span{font-size:10px;overflow-wrap:anywhere}.pair-choice-grid{grid-template-columns:1fr}.sticky-actions{margin-left:-14px;margin-right:-14px;padding-left:14px;padding-right:14px}}
-
-/* V5.4.5: iPhone-safe modal actions — no sticky/negative-margin positioning */
-.modal .sticky-actions{
-  position:relative !important;
-  inset:auto !important;
-  display:flex;
-  width:100% !important;
-  max-width:100% !important;
-  min-width:0 !important;
-  box-sizing:border-box !important;
-  margin:16px 0 0 !important;
-  padding:12px 0 calc(8px + env(safe-area-inset-bottom)) !important;
-  background:var(--surface);
-  z-index:1;
-  box-shadow:none;
-  transform:none !important;
-}
-.modal .sticky-actions .btn{
-  min-width:0 !important;
-  max-width:100%;
-  flex:1 1 0;
-}
-.modal .save-main{width:auto;max-width:100%;}
