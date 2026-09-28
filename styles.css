@@ -33,3 +33,19 @@
 /* V5.4 stable attendance modal: centered card instead of bottom sheet */
 .modal-backdrop{align-items:center;padding:12px;overflow:auto}.modal{width:min(680px,100%);max-height:min(760px,calc(100vh - 24px));border-radius:22px;margin:0;padding:18px 16px calc(16px + env(safe-area-inset-bottom));overflow:auto}.sticky-actions{bottom:-16px}
 @media(max-width:760px){.modal{margin:0;width:100%;border-radius:22px;max-height:calc(100vh - 24px)}}
+/* V5.4.2 iPhone modal hardening */
+.modal-backdrop{width:100vw;max-width:100%;box-sizing:border-box;overflow-x:hidden}
+.modal{box-sizing:border-box;width:calc(100vw - 24px);max-width:680px;min-width:0;overflow-x:hidden}
+.modal-head,.modal-actions,.field,.pair-choice-grid,.reason-grid{min-width:0;max-width:100%}
+.reason-grid .reason{min-width:0;overflow:hidden}
+.reason-grid .reason span{overflow-wrap:anywhere}
+.pair-choice{min-width:0;overflow:hidden}
+.pair-choice span:last-child{min-width:0;overflow:hidden}
+@media(max-width:520px){
+  .modal{width:calc(100vw - 24px);max-width:calc(100vw - 24px);padding-left:14px;padding-right:14px}
+  .reason-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .reason-grid .reason{padding:8px 5px}
+  .reason-grid .reason span{font-size:10px}
+  .modal-actions{flex-wrap:nowrap}
+  .modal-actions .btn{min-width:0}
+}
