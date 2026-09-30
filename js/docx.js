@@ -110,10 +110,12 @@
     return list.map(Number).filter(function(n){return Number.isFinite(n)&&n>=1;}).filter(function(n,i,a){return a.indexOf(n)===i;}).sort(function(a,b){return a-b;});
   }
   function hoursValue(record) {
+    if (!record) return 0;
     var pairs = pairNumbers(record);
-    if (pairs.length) return pairs.length * 2;
-    var n = Number(record && record.hours);
-    return n >= 2 ? Math.min(40, Math.round(n / 2) * 2) : 0;
+    if (pairs.length) return Math.min(40, pairs.length * 2);
+    var n = Number(record.hours);
+    if (Number.isFinite(n) && n > 0) return Math.min(40, Math.round(n / 2) * 2);
+    return 0;
   }
 
   function build(group, students, absences, monthKey, continuation) {

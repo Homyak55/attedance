@@ -574,7 +574,7 @@
         if(!a)return '<td class="'+(sun?'sun ':'')+'empty"><button data-action="history-edit-day" data-student="'+esc(s.id)+'" data-date="'+date+'">'+(d<=days?'·':'—')+'</button></td>';
         var h=a.hours; total+=h; if(a.confirmed&&a.reason!=='none')good+=h; else badRow+=h;
         if(a.reason==='order')notes.add('Р');
-        return '<td class="'+(sun?'sun ':'')+'filled"><button data-action="history-edit-day" data-student="'+esc(s.id)+'" data-date="'+date+'">'+'НБ'+'</button></td>';
+        return '<td class="'+(sun?'sun ':'')+'filled"><button data-action="history-edit-day" data-student="'+esc(s.id)+'" data-date="'+date+'">'+String(h||'')+'</button></td>';
       }).join('');
       if(isContinuation(month,s.id))notes.add('прод. бол.');
       grand+=total; ok+=good; bad+=badRow;
