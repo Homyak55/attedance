@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '5.5.0';
+  var APP_VERSION = '5.5.4';
   var MONTHS = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
   var REASONS = [
     {key:'family', label:'По семейным', short:'сем.', respected:true},
@@ -54,24 +54,19 @@
     });
   }
   function normalizePairs(value) {
-    var source=Array.isArray(value)?value:[], byNumber=new Map();
+    var source=Array.isArray(value)?value:[];
+    if(!source.length) return defaultPairs();
+    var byNumber=new Map();
     source.forEach(function(item,index){
       var number=Number(item&&item.number);
-      if(!Number.isFinite(number)||number<1) number=index+1;
+      if(!Number.isFinite(number)||number<1||number>6) number=index+1;
       number=Math.floor(number);
       if(number<1||number>6||byNumber.has(number)) return;
-      byNumber.set(number,item);
+      byNumber.set(number,item||{});
     });
-    return [1,2,3,4,5,6].map(function(number){
-      var item=byNumber.get(number)||{}, id=normalizeName(item.id)||('pair-'+number);
-      return {
-        id:id,
-        number:number,
-        start:normalizeName(item.start),
-        end:normalizeName(item.end),
-        subject:normalizeName(item.subject),
-        teacher:normalizeName(item.teacher)
-      };
+    return Array.from(byNumber.keys()).sort(function(a,b){return a-b;}).map(function(number){
+      var item=byNumber.get(number), id=normalizeName(item.id)||('pair-'+number);
+      return {id:id,number:number,start:normalizeName(item.start),end:normalizeName(item.end),subject:normalizeName(item.subject),teacher:normalizeName(item.teacher)};
     });
   }
   function activePairs() { return normalizePairs(state.settings.pairs); }
@@ -220,7 +215,8 @@
       var hours = Math.min(40, Math.max(0, hoursFromPairs(pairs)));
       if (!hours) return;
       var reason = ['family','sick','order','none'].indexOf(item.reason) >= 0 ? item.reason : 'none';
-      var allDay = !!item.allDay || pairs.length === activePairs().length;
+      var scheduled = scheduledPairNumbers(date);
+      var allDay = !!item.allDay || (scheduled.length > 0 && pairs.length === scheduled.length);
       map.set(studentId + '|' + date, {studentId:studentId,date:date,hours:hours,pairs:pairs,periods:pairs.slice(),allDay:allDay,reason:reason,confirmed:item.confirmed===undefined ? (reason!=='none') : !!item.confirmed});
     });
     return Array.from(map.values()).sort(function(a,b){ return a.date.localeCompare(b.date) || a.studentId.localeCompare(b.studentId); });
@@ -373,7 +369,8 @@
     var existing=state.absences.slice();
     dates.forEach(function(date){
       var scheduled=scheduledPairNumbers(date), allowed=new Set(attendancePairsForDate(date,null));
-      var selected=(m.pairs&&m.pairs.length?m.pairs:scheduled).map(Number).filter(function(n){return allowed.has(n);}).filter(function(n,i,a){return a.indexOf(n)===i;}).sort(function(a,b){return a-b;});
+      var sourcePairs=m.mode==='month' ? scheduled : (m.pairs&&m.pairs.length?m.pairs:scheduled);
+      var selected=sourcePairs.map(Number).filter(function(n){return allowed.has(n);}).filter(function(n,i,a){return a.indexOf(n)===i;}).sort(function(a,b){return a-b;});
       existing=existing.filter(function(a){return !(a.studentId===m.studentId && a.date===date);});
       if(selected.length) existing.push({studentId:m.studentId,date:date,pairs:selected,periods:selected,hours:hoursFromPairs(selected),allDay:scheduled.length>0&&selected.length===scheduled.length,reason:m.reason,confirmed:m.reason==='none'?false:!!m.confirmed});
     });
@@ -434,16 +431,23 @@
     var rows=Array.from(document.querySelectorAll('[data-pair-row]')).map(function(row,index){
       return {id:row.dataset.pairId||uid('pair'),number:Number(row.querySelector('[data-pair-number]').value)||index+1,start:row.querySelector('[data-pair-start]').value,end:row.querySelector('[data-pair-end]').value,subject:row.querySelector('[data-pair-subject]').value,teacher:row.querySelector('[data-pair-teacher]').value};
     });
-    rows=normalizePairs(rows); if(!rows.length){toast('Нужна хотя бы одна пара');return;}
-    var used=new Set(); for(var i=0;i<rows.length;i++){if(used.has(rows[i].number)){toast('Номера пар не должны повторяться');return;}used.add(rows[i].number);}
+    var rawNumbers=rows.map(function(r){return Number(r.number);});
+    if(rows.length<1){toast('Нужна хотя бы одна пара');return;}
+    if(rawNumbers.some(function(n){return !Number.isInteger(n)||n<1||n>6;})){toast('Номер пары должен быть от 1 до 6');return;}
+    var used=new Set(); for(var i=0;i<rawNumbers.length;i++){if(used.has(rawNumbers[i])){toast('Номера пар не должны повторяться');return;}used.add(rawNumbers[i]);}
+    rows=normalizePairs(rows);
     state.settings.pairs=rows;
     state.schedule=normalizeSchedule(state.schedule,rows);
     state.absences=normalizeAbsences(state.absences,state.students);
     persistNow(); render(); toast('Расписание пар сохранено');
   }
   function addPairRow() {
-    state.settings.pairs=normalizePairs(state.settings.pairs).concat([{id:uid('pair'),number:Math.max.apply(null,normalizePairs(state.settings.pairs).map(function(p){return p.number;}).concat([0]))+1,start:'',end:'',subject:'',teacher:''}]);
-    state.settings.pairs=normalizePairs(state.settings.pairs); render();
+    var pairs=normalizePairs(state.settings.pairs);
+    var used=new Set(pairs.map(function(p){return p.number;}));
+    var next=0; for(var n=1;n<=6;n++){if(!used.has(n)){next=n;break;}}
+    if(!next){toast('Можно настроить максимум 6 пар');return;}
+    state.settings.pairs=pairs.concat([{id:uid('pair'),number:next,start:'',end:'',subject:'',teacher:''}]);
+    render();
   }
   function removePairRow(id) {
     if(normalizePairs(state.settings.pairs).length<=1){toast('Оставь хотя бы одну пару');return;}
@@ -574,7 +578,7 @@
         if(!a)return '<td class="'+(sun?'sun ':'')+'empty"><button data-action="history-edit-day" data-student="'+esc(s.id)+'" data-date="'+date+'">'+(d<=days?'·':'—')+'</button></td>';
         var h=a.hours; total+=h; if(a.confirmed&&a.reason!=='none')good+=h; else badRow+=h;
         if(a.reason==='order')notes.add('Р');
-        return '<td class="'+(sun?'sun ':'')+'filled"><button data-action="history-edit-day" data-student="'+esc(s.id)+'" data-date="'+date+'">'+String(h||'')+'</button></td>';
+        return '<td class="'+(sun?'sun ':'')+'filled"><button data-action="history-edit-day" data-student="'+esc(s.id)+'" data-date="'+date+'">'+String(h)+'</button></td>';
       }).join('');
       if(isContinuation(month,s.id))notes.add('прод. бол.');
       grand+=total; ok+=good; bad+=badRow;
@@ -650,7 +654,8 @@
     if(m.type==='history-add'){
       var addPairs=activePairs().filter(function(p){return attendancePairsForDate(m.date,null).indexOf(p.number)>=0;});
       var addPairChoices=addPairs.map(function(p){var active=(m.pairs||[]).indexOf(p.number)>=0;return '<button class="pair-choice '+(active?'active':'')+'" data-action="history-add-toggle-pair" data-pair="'+p.number+'"><span class="pair-number">'+p.number+'</span><span><strong>'+esc(p.number+' пара')+'</strong><small>'+esc(actualSubjectLabel(m.date,p.id))+'</small></span></button>';}).join('');
-      return '<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>Добавить НБ</h3><button class="modal-close" data-action="close-modal">✕</button></div><div class="field"><label>Студент</label><select id="historyAddStudent">'+state.students.map(function(s){return '<option value="'+esc(s.id)+'" '+(m.studentId===s.id?'selected':'')+'>'+esc(s.name)+'</option>';}).join('')+'</select></div>'+(m.mode==='month'?'<div class="form-grid"><div class="field"><label>С даты</label><input id="historyAddStart" type="date" value="'+esc(m.startDate)+'"></div><div class="field"><label>По дату</label><input id="historyAddEnd" type="date" value="'+esc(m.endDate)+'"></div></div>':'<div class="field"><label>Дата</label><div class="readonly-date">'+esc(formatDate(m.date))+'</div></div>')+'<div class="field"><label>Пары</label><div class="pair-choice-grid">'+addPairChoices+'</div><div class="toolbar"><button class="btn small" data-action="history-add-all">Весь день</button><button class="btn small ghost" data-action="history-add-clear">Снять все</button></div></div><div class="field"><label>Причина</label><select id="historyAddReason"><option value="none" '+(m.reason==='none'?'selected':'')+'>Без причины</option><option value="family" '+(m.reason==='family'?'selected':'')+'>Семейные обстоятельства</option><option value="sick" '+(m.reason==='sick'?'selected':'')+'>Болезнь</option><option value="order" '+(m.reason==='order'?'selected':'')+'>Распоряжение</option></select></div><label class="toggle-line confirmation-line" '+(m.reason==='none'?'style="display:none"':'')+'><input id="historyAddConfirmed" type="checkbox" '+(m.confirmed?'checked':'')+'> <span><strong>Подтверждено</strong></span></label><div class="modal-actions sticky-actions"><button class="btn ghost" data-action="close-modal">Отмена</button><button class="btn primary save-main" data-action="save-history-add">Сохранить</button></div></div></div>';
+      var pairBlock=m.mode==='month' ? '<div class="field"><label>Пары</label><div class="empty">Для каждой даты пары подставятся автоматически по её расписанию.</div></div>' : '<div class="field"><label>Пары</label><div class="pair-choice-grid">'+addPairChoices+'</div><div class="toolbar"><button class="btn small" data-action="history-add-all">Весь день</button><button class="btn small ghost" data-action="history-add-clear">Снять все</button></div></div>';
+      return '<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>Добавить НБ</h3><button class="modal-close" data-action="close-modal">✕</button></div><div class="field"><label>Студент</label><select id="historyAddStudent">'+state.students.map(function(s){return '<option value="'+esc(s.id)+'" '+(m.studentId===s.id?'selected':'')+'>'+esc(s.name)+'</option>';}).join('')+'</select></div>'+(m.mode==='month'?'<div class="form-grid"><div class="field"><label>С даты</label><input id="historyAddStart" type="date" value="'+esc(m.startDate)+'"></div><div class="field"><label>По дату</label><input id="historyAddEnd" type="date" value="'+esc(m.endDate)+'"></div></div>':'<div class="field"><label>Дата</label><div class="readonly-date">'+esc(formatDate(m.date))+'</div></div>')+pairBlock+'<div class="field"><label>Причина</label><select id="historyAddReason"><option value="none" '+(m.reason==='none'?'selected':'')+'>Без причины</option><option value="family" '+(m.reason==='family'?'selected':'')+'>Семейные обстоятельства</option><option value="sick" '+(m.reason==='sick'?'selected':'')+'>Болезнь</option><option value="order" '+(m.reason==='order'?'selected':'')+'>Распоряжение</option></select></div><label class="toggle-line confirmation-line" '+(m.reason==='none'?'style="display:none"':'')+'><input id="historyAddConfirmed" type="checkbox" '+(m.confirmed?'checked':'')+'> <span><strong>Подтверждено</strong></span></label><div class="modal-actions sticky-actions"><button class="btn ghost" data-action="close-modal">Отмена</button><button class="btn primary save-main" data-action="save-history-add">Сохранить</button></div></div></div>';
     }
     if(m.type==='student') return '<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>'+ (m.studentId?'Изменить студента':'Новый студент') +'</h3><button class="modal-close" data-action="close-modal">✕</button></div><div class="field"><label>ФИО</label><input id="studentNameInput" value="'+esc(m.name)+'" autocomplete="off"></div><label class="toggle-line"><input id="studentMultiChild" type="checkbox" '+(m.multiChild?'checked':'')+'> <span><strong>Многодетный</strong><small>Учитывать в специальной ведомости питания</small></span></label><div class="modal-actions sticky-actions"><button class="btn ghost" data-action="close-modal">Отмена</button><button class="btn primary save-main" data-action="save-student">Сохранить</button></div></div></div>';
     var record=currentRecord(m.studentId,m.date), existing=!!record, pairs=activePairs().filter(function(p){ return attendancePairsForDate(m.date,record).indexOf(p.number)>=0; }), scheduled=scheduledPairNumbers(m.date), selected=new Set((m.pairs||[]).map(Number));
@@ -658,6 +663,17 @@
     var pairHint=scheduled.length ? '' : '<div class="empty">На эту дату по расписанию занятий нет.</div>';
     return '<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>'+esc(studentName(m.studentId))+'</h3><button class="modal-close" data-action="close-modal">✕</button></div><div class="field"><label>Дата</label><div class="readonly-date">'+esc(formatDate(m.date))+'</div></div><div class="field"><label>Пропущенные пары · '+esc(hoursFromPairs(m.pairs||[]))+' ч.</label>'+pairHint+'<div class="pair-choice-grid">'+pairChoices+'</div><div class="toolbar"><button class="btn small" data-action="select-all-pairs">Весь день</button><button class="btn small ghost" data-action="clear-pairs">Снять все</button></div></div><div class="field"><label>Причина</label><div class="reason-grid"><button class="reason '+(m.reason==='family'?'active':'')+'" data-action="set-reason" data-reason="family"><span>Семейные обстоятельства</span></button><button class="reason '+(m.reason==='sick'?'active':'')+'" data-action="set-reason" data-reason="sick"><span>Болезнь</span></button><button class="reason '+(m.reason==='order'?'active':'')+'" data-action="set-reason" data-reason="order"><strong>Р</strong><span>Распоряжение</span></button><button class="reason reason-none '+(m.reason==='none'?'active':'')+'" data-action="set-reason" data-reason="none"><strong>Неув</strong><span>Без причины</span></button></div></div><label class="toggle-line confirmation-line" '+(m.reason==='none'?'style="display:none"':'')+'><input id="attendanceConfirmed" type="checkbox" '+(m.confirmed?'checked':'')+'> <span><strong>Подтверждено</strong><small>После подтверждения часы считаются уважительными.</small></span></label><div class="modal-actions sticky-actions">'+(existing?'<button class="btn danger" data-action="remove-attendance">Снять НБ</button>':'')+'<button class="btn primary" data-action="save-attendance">'+((m.pairs||[]).length?'Сохранить НБ':'Сохранить')+'</button></div></div></div>';
   }
+  function renderGroup() {
+    var pairs=activePairs();
+    var pairRows=pairs.map(function(p){return '<div class="subject-row" data-pair-row data-pair-id="'+esc(p.id)+'"><div class="field"><label>№ пары</label><input data-pair-number type="number" min="1" max="6" value="'+esc(p.number)+'"></div><div class="field"><label>Начало</label><input data-pair-start type="time" value="'+esc(p.start)+'"></div><div class="field"><label>Конец</label><input data-pair-end type="time" value="'+esc(p.end)+'"></div><div class="field"><label>Занятие по умолчанию</label><input data-pair-subject value="'+esc(p.subject)+'" placeholder="Необязательно"></div><div class="field"><label>Преподаватель</label><input data-pair-teacher value="'+esc(p.teacher)+'" placeholder="Необязательно"></div><button class="btn small danger" data-action="delete-pair" data-pair-id="'+esc(p.id)+'">Удалить</button></div>';}).join('');
+    var students=state.students.map(function(s,index){return '<div class="history-row"><div class="history-main"><div class="history-title">'+esc(String(index+1)+'. '+s.name)+'</div><div class="history-sub">'+(s.multiChild?'Многодетный':'Обычный')+'</div></div><div class="toolbar"><button class="btn small" data-action="edit-student" data-student="'+esc(s.id)+'">Изменить</button><button class="btn small danger" data-action="delete-student" data-student="'+esc(s.id)+'">Удалить</button></div></div>';}).join('');
+    return '<div class="page-card"><h3>Данные группы</h3><div class="form-grid"><div class="field"><label>Учреждение</label><input id="gInstitution" value="'+esc(state.group.institution)+'"></div><div class="field"><label>Краткое название</label><input id="gInstitutionShort" value="'+esc(state.group.institutionShort)+'"></div><div class="field"><label>Специальность</label><input id="gSpecialty" value="'+esc(state.group.specialty)+'"></div><div class="field"><label>Группа</label><input id="gGroup" value="'+esc(state.group.group)+'"></div><div class="field"><label>Куратор</label><input id="gCurator" value="'+esc(state.group.curator)+'"></div><div class="field"><label>Староста</label><input id="gLeader" value="'+esc(state.group.groupLeader)+'"></div></div><div class="toolbar"><button class="btn primary" data-action="save-group">Сохранить данные группы</button></div></div><div class="page-card"><h3>Студенты</h3><div class="toolbar"><button class="btn primary" data-action="new-student">Добавить студента</button><button class="btn" data-action="restore-template">Вернуть 25 ФИО шаблона</button></div><div class="field"><label>Список ФИО</label><textarea id="bulkNames" rows="10" placeholder="Одно ФИО в строке">'+esc(state.bulkNames)+'</textarea></div><div class="toolbar"><button class="btn" data-action="bulk-load">Загрузить список</button></div><div class="history-list">'+(students||'<div class="empty">Студентов пока нет.</div>')+'</div></div><div class="page-card"><h3>Пары</h3><p>Первые три пары используются в недельном расписании. Пары 4–6 можно назначать только для конкретной даты.</p><div class="subjects-list">'+pairRows+'</div><div class="toolbar"><button class="btn primary" data-action="save-pairs">Сохранить пары</button></div></div>';
+  }
+  function renderBackup() {
+    var size=(new Blob([JSON.stringify(snapshot())]).size/1024).toFixed(1);
+    return '<div class="page-card"><h3>Резервная копия</h3><p>В резерв входят группа, студенты, отметки НБ, история, отчёты, настройки и расписание.</p><div class="toolbar"><button class="btn primary" data-action="export-backup">Создать backup</button><button class="btn" data-action="import-backup">Восстановить backup</button></div><div class="footer-note">Текущий размер данных: '+size+' КБ.</div></div>';
+  }
+
   function renderApp() {
     var body=state.screen==='home'?renderHome():state.screen==='report'?renderReport():state.screen==='history'?renderHistory():state.screen==='schedule'?renderSchedule():state.screen==='group'?renderGroup():state.screen==='backup'?renderBackup():renderSettings();
     return topbar(titleForScreen(),subtitleForScreen())+'<main class="app-shell"><div class="content">'+body+'</div></main>'+(state.drawer?renderDrawer():'')+(state.modal?renderModal():'');

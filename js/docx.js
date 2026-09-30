@@ -110,12 +110,10 @@
     return list.map(Number).filter(function(n){return Number.isFinite(n)&&n>=1;}).filter(function(n,i,a){return a.indexOf(n)===i;}).sort(function(a,b){return a-b;});
   }
   function hoursValue(record) {
-    if (!record) return 0;
     var pairs = pairNumbers(record);
-    if (pairs.length) return Math.min(40, pairs.length * 2);
-    var n = Number(record.hours);
-    if (Number.isFinite(n) && n > 0) return Math.min(40, Math.round(n / 2) * 2);
-    return 0;
+    if (pairs.length) return pairs.length * 2;
+    var n = Number(record && record.hours);
+    return n >= 2 ? Math.min(40, Math.round(n / 2) * 2) : 0;
   }
 
   function build(group, students, absences, monthKey, continuation) {
@@ -239,7 +237,7 @@
     });
     function isOff(day) {
       var date = monthKey + '-' + String(day).padStart(2, '0');
-      return dayOfWeek(year, month, day) === 0 || !!nonSchool[date];
+      return dayOfWeek(year, month, day) === 0 || dayOfWeek(year, month, day) === 6 || !!nonSchool[date];
     }
     function pairNumbers(record) {
       var list = Array.isArray(record && record.pairs) ? record.pairs : (Array.isArray(record && record.periods) ? record.periods : []);
@@ -265,9 +263,18 @@
         var d=idx+1; if(d>days)return cell('',dayWidths[idx],{size:14});
         if(isOff(d))return cell('',dayWidths[idx],{fill:'FECACA',size:14});
         school++; var record=map.get(d);
+        var date=monthKey+'-'+String(d).padStart(2,'0');
+        var scheduledCount=0;
+        if(schedule && !nonSchool[date]){
+          var weekday=dayOfWeek(year,month,d), effective={};
+          if(weekday>=1 && weekday<=6) effective=Object.assign({}, (schedule.weekly&&schedule.weekly[weekday]) || {});
+          var overrides=schedule.dateOverrides&&schedule.dateOverrides[date];
+          if(overrides) Object.keys(overrides).forEach(function(pairId){ if(overrides[pairId]===null || overrides[pairId]==='') delete effective[pairId]; else effective[pairId]=overrides[pairId]; });
+          scheduledCount=Object.keys(effective).filter(function(pairId){return !!effective[pairId];}).length;
+        }
         var absentAllDay=!!(record&&record.allDay);
-        if(record&&!absentAllDay&&Number(record.scheduledPairsCount)>0){
-          absentAllDay=pairNumbers(record).length>=Number(record.scheduledPairsCount);
+        if(record&&!absentAllDay&&scheduledCount>0){
+          absentAllDay=pairNumbers(record).length>=scheduledCount;
         }
         if(absentAllDay){not++;return cell('-',dayWidths[idx],{bold:true,size:17});}
         fed++;return cell('+',dayWidths[idx],{bold:true,size:17});
