@@ -101,8 +101,8 @@
   function dayOfWeek(year, month, day) { return new Date(year, month - 1, day).getDay(); }
   function reasonShort(reason) {
     if (reason === 'order') return 'Р';
-    if (reason === 'sick') return 'бол.';
-    if (reason === 'family') return 'сем.';
+    if (reason === 'sick') return '';
+    if (reason === 'family') return '';
     return '';
   }
   function pairNumbers(record) {
@@ -116,7 +116,7 @@
     return n >= 2 ? Math.min(40, Math.round(n / 2) * 2) : 0;
   }
 
-  function build(group, students, absences, monthKey) {
+  function build(group, students, absences, monthKey, continuation) {
     var parts = String(monthKey || '').split('-');
     var year = Number(parts[0]), month = Number(parts[1]);
     if (!year || month < 1 || month > 12) throw new Error('Некорректный месяц');
@@ -131,14 +131,14 @@
       byStudent.set(a.studentId, list);
     });
 
-    var nW = 420, nameW = 1850, dayW = 300, totalW = 550, reasonW = 500, noteW = 730;
+    var nW = 360, nameW = 1750, dayW = 285, totalW = 500, reasonW = 460, noteW = 680;
     var tableW = nW + nameW + (dayW * 31) + totalW + (reasonW * 2) + noteW;
     var borders = '<w:tblBorders><w:top w:val="single" w:sz="8"/><w:left w:val="single" w:sz="8"/><w:bottom w:val="single" w:sz="8"/><w:right w:val="single" w:sz="8"/><w:insideH w:val="single" w:sz="4"/><w:insideV w:val="single" w:sz="4"/></w:tblBorders>';
     var tblPr = '<w:tblPr><w:tblW w:w="' + tableW + '" w:type="dxa"/><w:jc w:val="center"/><w:tblLayout w:type="fixed"/>' + borders + '</w:tblPr>';
     var widths = [nW, nameW].concat(Array(31).fill(dayW), [totalW, reasonW, reasonW, noteW]);
     var grid = '<w:tblGrid>' + widths.map(function (w) { return '<w:gridCol w:w="' + w + '"/>'; }).join('') + '</w:tblGrid>';
 
-    var h1 = '<w:tr><w:trPr><w:trHeight w:val="720" w:hRule="exact"/><w:cantSplit/></w:trPr>' +
+    var h1 = '<w:tr><w:trPr><w:trHeight w:val="560" w:hRule="exact"/><w:cantSplit/></w:trPr>' +
       cell('№\nп/п', nW, {bold:true, size:18, vMerge:'restart'}) +
       cell('ФИ студента', nameW, {bold:true, size:18, align:'left', vMerge:'restart'}) +
       cell('Числа месяца', dayW * 31, {bold:true, size:18, gridSpan:31}) +
@@ -146,7 +146,7 @@
       cell('Из них\nпо\nпричинам', reasonW * 2, {bold:true, size:17, gridSpan:2}) +
       cell('примечание', noteW, {bold:true, size:16, vMerge:'restart'}) + '</w:tr>';
 
-    var h2 = '<w:tr><w:trPr><w:trHeight w:val="330" w:hRule="exact"/><w:cantSplit/></w:trPr>' +
+    var h2 = '<w:tr><w:trPr><w:trHeight w:val="300" w:hRule="exact"/><w:cantSplit/></w:trPr>' +
       cell('', nW, {vMerge:'continue'}) + cell('', nameW, {vMerge:'continue'}) +
       Array.from({length:31}, function (_, i) {
         var d = i + 1, sun = d <= days && dayOfWeek(year, month, d) === 0;
@@ -164,18 +164,19 @@
         var d = idx + 1, sun = d <= days && dayOfWeek(year, month, d) === 0, record = map.get(d);
         if (!record) return cell(d <= days ? '' : '—', dayW, {fill:sun?'FEE2E2':undefined, size:14});
         var h = hoursValue(record); total += h;
-        if (record.reason === 'none') bad += h; else good += h;
-        var note = reasonShort(record.reason); if (note) notes.add(note); var pairList = pairNumbers(record); if (pairList.length) notes.add('пары: ' + pairList.join(', '));
-        return cell(String(h), dayW, {bold:true, size:15, fill:sun?'DC2626':undefined, white:sun});
+        if (record.confirmed && record.reason !== 'none') good += h; else bad += h;
+        if (record.reason === 'order') notes.add('Р');
+        return cell(String(h), dayW, {bold:true, size:14, fill:sun?'DC2626':undefined, white:sun});
       }).join('');
+      if (continuation && continuation[monthKey+'|'+student.id]) notes.add('прод. бол.');
       grand += total; respectful += good; disrespectful += bad;
-      rows.push('<w:tr><w:trPr><w:trHeight w:val="290" w:hRule="exact"/><w:cantSplit/></w:trPr>' +
+      rows.push('<w:tr><w:trPr><w:trHeight w:val="260" w:hRule="exact"/><w:cantSplit/></w:trPr>' +
         cell(String(index + 1), nW, {size:15}) + cell(student.name, nameW, {size:15, align:'left'}) + dayCells +
         cell(total ? String(total) : '-', totalW, {bold:true, size:15}) + cell(good ? String(good) : '-', reasonW, {bold:true, size:15}) +
         cell(bad ? String(bad) : '-', reasonW, {bold:true, size:15}) + cell(Array.from(notes).join('\n'), noteW, {size:14, align:'left'}) + '</w:tr>');
     });
 
-    rows.push('<w:tr><w:trPr><w:trHeight w:val="330" w:hRule="exact"/><w:cantSplit/></w:trPr>' +
+    rows.push('<w:tr><w:trPr><w:trHeight w:val="300" w:hRule="exact"/><w:cantSplit/></w:trPr>' +
       cell('ИТОГО', nW + nameW, {bold:true, size:16, align:'left', gridSpan:2}) +
       Array(31).fill(0).map(function () { return cell('', dayW, {size:13}); }).join('') +
       cell(grand ? String(grand) : '-', totalW, {bold:true, size:16}) + cell(respectful ? String(respectful) : '-', reasonW, {bold:true, size:16}) +
@@ -192,8 +193,8 @@
       paragraph(run('учета посещаемости занятий', {bold:true, size:20}), {align:'center', after:120, line:220, keepNext:true}) +
       details + table +
       paragraph(run('Классный руководитель __________________  ' + (group.curator || ''), {size:18}), {before:240, after:30, line:220}) +
-      paragraph(run('Староста                    __________________  ' + (group.groupLeader || ''), {size:18}), {line:220}) +
-      '<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="240" w:right="720" w:bottom="270" w:left="720" w:header="0" w:footer="0" w:gutter="0"/><w:cols w:num="1"/><w:docGrid w:linePitch="240"/></w:sectPr>' +
+      paragraph(run('Староста                    __________________  ' + (group.groupLeader || ''), {size:18}), {line:180}) +
+      '<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="180" w:right="520" w:bottom="180" w:left="520" w:header="0" w:footer="0" w:gutter="0"/><w:cols w:num="1"/><w:docGrid w:linePitch="240"/></w:sectPr>' +
       '</w:body></w:document>';
 
     var styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:style></w:styles>';
@@ -252,8 +253,8 @@
     var tblPr='<w:tblPr><w:tblW w:w="'+tableW+'" w:type="dxa"/><w:jc w:val="center"/><w:tblLayout w:type="fixed"/>'+borders+'</w:tblPr>';
     var widths=[nameW].concat(dayWidths,[totalW,notFedW,fedW]);
     var grid='<w:tblGrid>'+widths.map(function(w){return '<w:gridCol w:w="'+w+'"/>';}).join('')+'</w:tblGrid>';
-    var h1='<w:tr><w:trPr><w:trHeight w:val="720" w:hRule="exact"/><w:cantSplit/></w:trPr>'+cell('ФИО студента',nameW,{bold:true,size:18})+cell('Числа месяца',dayTotal,{bold:true,size:18,gridSpan:31})+cell('ВСЕГО ДНЕЙ в МЕСЯЦЕ\n(без выходных)',totalW,{bold:true,size:15})+cell('ВСЕГО НЕ ПИТАЛСЯ',notFedW,{bold:true,size:15})+cell('ВСЕГО ПИТАЛСЯ',fedW,{bold:true,size:15})+'</w:tr>';
-    var h2='<w:tr><w:trPr><w:trHeight w:val="330" w:hRule="exact"/><w:cantSplit/></w:trPr>'+cell('',nameW)+Array.from({length:31},function(_,i){var d=i+1,off=d<=days&&isOff(d);return cell(d<=days?String(d):'',dayWidths[i],{bold:true,size:15,fill:off?'B91C1C':undefined,white:off});}).join('')+cell('',totalW)+cell('',notFedW)+cell('',fedW)+'</w:tr>';
+    var h1='<w:tr><w:trPr><w:trHeight w:val="560" w:hRule="exact"/><w:cantSplit/></w:trPr>'+cell('ФИО студента',nameW,{bold:true,size:18})+cell('Числа месяца',dayTotal,{bold:true,size:18,gridSpan:31})+cell('ВСЕГО ДНЕЙ в МЕСЯЦЕ\n(без выходных)',totalW,{bold:true,size:15})+cell('ВСЕГО НЕ ПИТАЛСЯ',notFedW,{bold:true,size:15})+cell('ВСЕГО ПИТАЛСЯ',fedW,{bold:true,size:15})+'</w:tr>';
+    var h2='<w:tr><w:trPr><w:trHeight w:val="300" w:hRule="exact"/><w:cantSplit/></w:trPr>'+cell('',nameW)+Array.from({length:31},function(_,i){var d=i+1,off=d<=days&&isOff(d);return cell(d<=days?String(d):'',dayWidths[i],{bold:true,size:15,fill:off?'B91C1C':undefined,white:off});}).join('')+cell('',totalW)+cell('',notFedW)+cell('',fedW)+'</w:tr>';
     var rows=[];
     (students||[]).forEach(function(student,index){
       var map=new Map((byStudent.get(student.id)||[]).map(function(a){return [Number(String(a.date).slice(-2)),a];}));
@@ -274,7 +275,7 @@
     var table='<w:tbl>'+tblPr+grid+h1+h2+rows.join('')+'</w:tbl>';
     var institution=group.institution||'', short=group.institutionShort?'\n('+group.institutionShort+')':'', monthName=MONTHS[month-1];
     var details=paragraph(run('группа  ',{size:18})+run(group.group||'',{size:18,underline:true})+run('   месяц ',{size:18})+run(monthName+' '+year,{size:18,underline:true})+run(' год',{size:18}),{align:'center',after:210,line:220});
-    var doc='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'+paragraph(run(institution+short,{size:20}),{align:'center',after:20,line:220,keepNext:true})+paragraph(run('ВЕДОМОСТЬ',{bold:true,size:24}),{align:'center',after:0,line:220,keepNext:true})+paragraph(run('учета студентов, посещающих учебные занятия и принимающих горячее питание из многодетных семей',{bold:true,size:20}),{align:'center',after:120,line:220,keepNext:true})+details+table+paragraph(run('Ответственный за питание    ___________________', {size:18}),{before:240,after:30,line:220})+'<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="240" w:right="720" w:bottom="270" w:left="720" w:header="0" w:footer="0" w:gutter="0"/><w:cols w:num="1"/></w:sectPr></w:body></w:document>';
+    var doc='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'+paragraph(run(institution+short,{size:20}),{align:'center',after:20,line:220,keepNext:true})+paragraph(run('ВЕДОМОСТЬ',{bold:true,size:24}),{align:'center',after:0,line:220,keepNext:true})+paragraph(run('учета студентов, посещающих учебные занятия и принимающих горячее питание из многодетных семей',{bold:true,size:20}),{align:'center',after:120,line:220,keepNext:true})+details+table+paragraph(run('Ответственный за питание    ___________________', {size:18}),{before:80,after:10,line:180})+'<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="180" w:right="520" w:bottom="180" w:left="520" w:header="0" w:footer="0" w:gutter="0"/><w:cols w:num="1"/></w:sectPr></w:body></w:document>';
     var styles='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:sz w:val="20"/></w:rPr></w:style></w:styles>';
     var settings='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:zoom w:percent="80"/></w:settings>';
     var contentTypes='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>';

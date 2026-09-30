@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '5.4.5';
+  var APP_VERSION = '5.5.0';
   var MONTHS = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
   var REASONS = [
     {key:'family', label:'По семейным', short:'сем.', respected:true},
@@ -27,8 +27,8 @@
     loading:true, screen:'home', drawer:false, modal:null, toast:'',
     students:[], absences:[], group:normalizeGroup(DEFAULT_GROUP),
     reports:[], settings:{theme:'light',pairs:defaultPairs()}, schedule:defaultSchedule(), scheduleDate:today(),
-    reportMonth:monthKey(new Date()), historyMonth:monthKey(new Date()), historyDay:today(), historyMode:'month', historyStudentId:'all', historySubjectName:'all', historyPair:'all',
-    bulkNames:'', pendingExport:null, lastSaveOk:true
+    reportMonth:monthKey(new Date()), historyMonth:monthKey(new Date()), historyDay:today(), historyMode:'month', historyStudentId:'all', historySubjectName:'all',
+    historyAdd:null, continuation:{}, bulkNames:'', pendingExport:null, lastSaveOk:true
   };
 
   function esc(value) { return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
@@ -221,7 +221,7 @@
       if (!hours) return;
       var reason = ['family','sick','order','none'].indexOf(item.reason) >= 0 ? item.reason : 'none';
       var allDay = !!item.allDay || pairs.length === activePairs().length;
-      map.set(studentId + '|' + date, {studentId:studentId,date:date,hours:hours,pairs:pairs,periods:pairs.slice(),allDay:allDay,reason:reason});
+      map.set(studentId + '|' + date, {studentId:studentId,date:date,hours:hours,pairs:pairs,periods:pairs.slice(),allDay:allDay,reason:reason,confirmed:item.confirmed===undefined ? (reason!=='none') : !!item.confirmed});
     });
     return Array.from(map.values()).sort(function(a,b){ return a.date.localeCompare(b.date) || a.studentId.localeCompare(b.studentId); });
   }
@@ -232,7 +232,7 @@
     return {students:state.students.length,marked:rows.length,hours:rows.reduce(function(sum,a){return sum+a.hours;},0)};
   }
   function snapshot() {
-    return {schemaVersion:4,appVersion:APP_VERSION,students:state.students,absences:state.absences,group:state.group,reports:state.reports,settings:state.settings,schedule:state.schedule,updatedAt:new Date().toISOString()};
+    return {schemaVersion:5,appVersion:APP_VERSION,students:state.students,absences:state.absences,group:state.group,reports:state.reports,settings:state.settings,schedule:state.schedule,continuation:state.continuation,updatedAt:new Date().toISOString()};
   }
 
   function normalizeLoadedData(data) {
@@ -243,7 +243,7 @@
     state.students=students; state.group=normalizeGroup(data && data.group);
     state.reports=reports; state.settings={theme:['light','dark','system'].indexOf(data && data.settings && data.settings.theme)>=0 ? data.settings.theme : 'light',pairs:pairs};
     state.schedule=normalizeSchedule(data && data.schedule,pairs);
-    state.absences=normalizeAbsences(data && data.absences, students);
+    state.absences=normalizeAbsences(data && data.absences, students); state.continuation=(data && data.continuation && typeof data.continuation==='object') ? data.continuation : {};
   }
 
   async function loadData() {
@@ -299,7 +299,7 @@
 
   function exportBackup() {
     try {
-      var json=JSON.stringify({backupFormat:'AttendanceJournal',backupVersion:4,exportedAt:new Date().toISOString(),appVersion:APP_VERSION,data:snapshot()},null,2);
+      var json=JSON.stringify({backupFormat:'AttendanceJournal',backupVersion:5,exportedAt:new Date().toISOString(),appVersion:APP_VERSION,data:snapshot()},null,2);
       prepareExport(new Blob([json],{type:'application/json'}),'AttendanceJournal_backup_' + today() + '.json','application/json');
     } catch (error) {
       console.error(error); alert('Не удалось подготовить резервную копию.');
@@ -332,7 +332,7 @@
     var selected=(m.pairs||[]).map(Number).filter(function(n){return allowed.has(n);}).filter(function(n,i,a){return a.indexOf(n)===i;}).sort(function(a,b){return a-b;});
     var scheduled=scheduledPairNumbers(m.date);
     var existing=state.absences.filter(function(a){return !(a.studentId===m.studentId && a.date===m.date);});
-    if (selected.length) existing.push({studentId:m.studentId,date:m.date,pairs:selected,periods:selected,hours:hoursFromPairs(selected),allDay:scheduled.length>0&&selected.length===scheduled.length,reason:m.reason});
+    if (selected.length) existing.push({studentId:m.studentId,date:m.date,pairs:selected,periods:selected,hours:hoursFromPairs(selected),allDay:scheduled.length>0&&selected.length===scheduled.length,reason:m.reason,confirmed:m.reason==='none'?false:!!m.confirmed});
     state.absences=normalizeAbsences(existing,state.students); state.modal=null; persistNow(); render(); toast(selected.length ? (scheduled.length>0&&selected.length===scheduled.length ? 'НБ сохранена: весь день' : 'НБ сохранена: '+selected.length+' '+(selected.length===1?'пара':'пары')+' · '+hoursFromPairs(selected)+' ч.') : 'НБ снята');
   }
   function removeAttendance() {
@@ -340,8 +340,53 @@
     state.absences=state.absences.filter(function(a){return !(a.studentId===m.studentId && a.date===m.date);}); state.modal=null; persistNow(); render(); toast('НБ снята');
   }
   function openAttendance(studentId,date) {
-    var record=currentRecord(studentId,date); state.modal={type:'attendance',studentId:studentId,date:date,hours:record?record.hours:0,pairs:record?pairNumbersFromRecord(record):[],periods:record?pairNumbersFromRecord(record):[],reason:record?record.reason:'none'}; render();
+    var record=currentRecord(studentId,date); state.modal={type:'attendance',studentId:studentId,date:date,hours:record?record.hours:0,pairs:record?pairNumbersFromRecord(record):[],periods:record?pairNumbersFromRecord(record):[],reason:record?record.reason:'none',confirmed:record?!!record.confirmed:false}; render();
   }
+  function continuationKey(month, studentId) { return String(month)+'|'+String(studentId); }
+  function isContinuation(month, studentId) { return !!state.continuation[continuationKey(month, studentId)]; }
+  function setContinuation(month, studentId, value) {
+    var key=continuationKey(month, studentId);
+    if(value) state.continuation[key]=true; else delete state.continuation[key];
+    persistNow(); render();
+    toast(value ? 'Отметка «прод. бол.» установлена' : 'Отметка «прод. бол.» снята');
+  }
+  function openHistoryAdd(mode, date) {
+    var selectedDate=date || state.historyDay || state.historyMonth+'-01';
+    state.modal={type:'history-add',mode:mode||'day',studentId:state.historyStudentId!=='all'?state.historyStudentId:'',date:selectedDate,startDate:selectedDate,endDate:selectedDate,pairs:[],reason:'none',confirmed:false};
+    render();
+  }
+  function historyAddDates(m) {
+    var dates=[], start=String(m.startDate||m.date||'').slice(0,10), end=String(m.endDate||m.date||'').slice(0,10);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(start)) return dates;
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(end)) end=start;
+    if(start>end){ var t=start; start=end; end=t; }
+    var d=new Date(start+'T12:00:00'), last=new Date(end+'T12:00:00'), guard=0;
+    while(d<=last && guard++<62){ dates.push(iso(d)); d.setDate(d.getDate()+1); }
+    return dates;
+  }
+  function saveHistoryAdd() {
+    var m=state.modal; if(!m || m.type!=='history-add') return;
+    if(!m.studentId){ toast('Выбери студента'); return; }
+    var dates=m.mode==='month'?historyAddDates(m):[m.date];
+    dates=dates.filter(function(d){return d.indexOf(state.historyMonth+'-')===0;});
+    if(!dates.length){ toast('Выбери даты в текущем месяце'); return; }
+    var existing=state.absences.slice();
+    dates.forEach(function(date){
+      var scheduled=scheduledPairNumbers(date), allowed=new Set(attendancePairsForDate(date,null));
+      var selected=(m.pairs&&m.pairs.length?m.pairs:scheduled).map(Number).filter(function(n){return allowed.has(n);}).filter(function(n,i,a){return a.indexOf(n)===i;}).sort(function(a,b){return a-b;});
+      existing=existing.filter(function(a){return !(a.studentId===m.studentId && a.date===date);});
+      if(selected.length) existing.push({studentId:m.studentId,date:date,pairs:selected,periods:selected,hours:hoursFromPairs(selected),allDay:scheduled.length>0&&selected.length===scheduled.length,reason:m.reason,confirmed:m.reason==='none'?false:!!m.confirmed});
+    });
+    state.absences=normalizeAbsences(existing,state.students); state.modal=null; persistNow(); render(); toast('НБ добавлена за '+dates.length+' '+(dates.length===1?'день':'дня'));
+  }
+  function toggleRecordConfirmation(studentId,date) {
+    var record=currentRecord(studentId,date); if(!record) return;
+    if(record.reason==='none'){ toast('Для записи без причины подтверждение не требуется'); return; }
+    state.absences=state.absences.map(function(a){return a.studentId===studentId&&a.date===date ? Object.assign({},a,{confirmed:!a.confirmed}) : a;});
+    persistNow(); render();
+    var updated=currentRecord(studentId,date); toast(updated&&updated.confirmed?'Отметка подтверждена':'Подтверждение снято');
+  }
+
   function saveStudent() {
     var m=state.modal; if (!m || m.type!=='student') return;
     var name=normalizeName(m.name); if (!name) { toast('Введите ФИО'); return; }
@@ -466,7 +511,7 @@
 
   function generateReport(month) {
     try {
-      var bytes=window.AttendanceDocx.buildAttendanceDocx(state.group,state.students,state.absences,month);
+      var bytes=window.AttendanceDocx.buildAttendanceDocx(state.group,state.students,state.absences,month,state.continuation);
       var filename='Ведомость_' + safeFilename(state.group.group) + '_' + month + '.docx';
       state.reports=[{monthKey:month,generatedAt:new Date().toISOString(),filename:filename}].concat(state.reports.filter(function(r){return r.monthKey!==month;})).slice(0,24);
       persistNow();
@@ -517,7 +562,7 @@
   function subtitleForScreen() { return state.screen==='home' ? state.group.group + ' · ' + formatDate(today()) : ''; }
   function renderHome() {
     var st=statsForToday();
-    return '<section class="hero"><div class="eyebrow">Сегодня · '+esc(state.group.group)+'</div><h1>'+esc(formatDate(today()))+'</h1><div class="date">Отмечай только НБ — ведомость и итоги приложение заполнит само.</div><div class="stats"><div class="stat"><div class="n">'+st.students+'</div><div class="l">студентов</div></div><div class="stat"><div class="n">'+st.marked+'</div><div class="l">с НБ сегодня</div></div><div class="stat"><div class="n">'+st.hours+'</div><div class="l">часов НБ</div></div></div></section><div class="section-title"><h2>Группа</h2><span class="hint">Нажми на студента</span></div><div class="student-list">'+(state.students.length ? state.students.map(function(s){var a=currentRecord(s.id,today());var label=a ? (a.allDay ? 'Весь день НБ' : 'НБ · '+a.hours+' ч.') : 'Нет НБ';return '<button class="student-card" data-action="attendance" data-student="'+esc(s.id)+'"><div class="student-main"><div class="student-name">'+esc(s.name)+'</div><div class="student-meta">'+esc(a?reasonInfo(a.reason).label:'Посещаемость без НБ')+'</div></div><span class="badge '+(a?'nb':'none')+'">'+esc(label)+'</span></button>';}).join('') : '<div class="page-card"><div class="empty">Пока нет студентов. Добавь их в разделе «Группа».</div></div>')+'</div><div class="section-title"><h2>Быстрые действия</h2></div><div class="toolbar"><button class="btn primary" data-action="screen" data-screen="report">📄 Ведомость</button><button class="btn" data-action="screen" data-screen="history">🕘 История</button></div>';
+    return '<section class="hero"><div class="eyebrow">Сегодня · '+esc(state.group.group)+'</div><h1>'+esc(formatDate(today()))+'</h1><div class="date">Отмечай только НБ — ведомость и итоги приложение заполнит само.</div><div class="stats"><div class="stat"><div class="n">'+st.students+'</div><div class="l">студентов</div></div><div class="stat"><div class="n">'+st.marked+'</div><div class="l">с НБ сегодня</div></div><div class="stat"><div class="n">'+st.hours+'</div><div class="l">часов НБ</div></div></div></section><div class="section-title"><h2>Группа</h2><span class="hint">Нажми на студента</span></div><div class="student-list">'+(state.students.length ? state.students.map(function(s){var a=currentRecord(s.id,today());var label=a ? (a.allDay ? 'Весь день НБ' : 'НБ · '+a.hours+' ч.') : 'Нет НБ';return '<button class="student-card" data-action="attendance" data-student="'+esc(s.id)+'"><div class="student-main"><div class="student-name">'+esc(s.name)+'</div><div class="student-meta">'+esc(a?reasonInfo(a.reason).label:'Посещаемость без НБ')+'</div></div><span class="badge '+(a?'nb':'none')+'">'+esc(label)+'</span></button>';}).join('') : '<div class="page-card"><div class="empty">Пока нет студентов. Добавь их в разделе «Группа».</div></div>')+'</div><div class="section-title"><h2>Быстрые действия</h2></div><div class="toolbar"><button class="btn primary" data-action="screen" data-screen="report">Ведомость</button><button class="btn" data-action="screen" data-screen="history">История</button></div>';
   }
   function reportSummary(month) { var rows=state.absences.filter(function(a){return a.date.indexOf(month+'-')===0;}); var total=0,ok=0,bad=0; rows.forEach(function(a){total+=a.hours;if(a.reason==='none')bad+=a.hours;else ok+=a.hours;}); return {records:rows.length,total:total,ok:ok,bad:bad}; }
   function renderReportTable(month) {
@@ -525,76 +570,51 @@
     var rows=state.students.map(function(s,index){
       var total=0,good=0,badRow=0,notes=new Set();
       var cells=Array.from({length:31},function(_,i){
-        var d=i+1, date=month+'-'+String(d).padStart(2,'0'), sun=d<=days&&dayOfWeek(month,d)===0, a=d<=days?currentRecord(s.id,date):null;
-        if(!a) return '<td class="'+(sun?'sun ':'')+'empty"><button data-action="edit-record" data-student="'+esc(s.id)+'" data-date="'+date+'">'+(d<=days?'·':'—')+'</button></td>';
-        total+=a.hours; if(a.reason==='none')badRow+=a.hours; else good+=a.hours; var n=reasonInfo(a.reason).short; if(n!=='без причины')notes.add(n);
-        return '<td class="'+(sun?'sun ':'')+'filled"><button data-action="edit-record" data-student="'+esc(s.id)+'" data-date="'+date+'">'+a.hours+'</button></td>';
+        var d=i+1,date=month+'-'+String(d).padStart(2,'0'),sun=d<=days&&dayOfWeek(month,d)===0,a=d<=days?currentRecord(s.id,date):null;
+        if(!a)return '<td class="'+(sun?'sun ':'')+'empty"><button data-action="history-edit-day" data-student="'+esc(s.id)+'" data-date="'+date+'">'+(d<=days?'·':'—')+'</button></td>';
+        var h=a.hours; total+=h; if(a.confirmed&&a.reason!=='none')good+=h; else badRow+=h;
+        if(a.reason==='order')notes.add('Р');
+        return '<td class="'+(sun?'sun ':'')+'filled"><button data-action="history-edit-day" data-student="'+esc(s.id)+'" data-date="'+date+'">'+'НБ'+'</button></td>';
       }).join('');
-      grand+=total;ok+=good;bad+=badRow;
-      return '<tr><td>'+(index+1)+'</td><td class="name">'+esc(s.name)+'</td>'+cells+'<td class="total">'+(total||'—')+'</td><td class="total">'+(good||'—')+'</td><td class="total">'+(badRow||'—')+'</td><td class="name">'+esc(Array.from(notes).join(' · '))+'</td></tr>';
+      if(isContinuation(month,s.id))notes.add('прод. бол.');
+      grand+=total; ok+=good; bad+=badRow;
+      return '<tr><td>'+String(index+1)+'</td><td class="name">'+esc(s.name)+'</td>'+cells+'<td class="total">'+(total||'—')+'</td><td class="total">'+(good||'—')+'</td><td class="total">'+(badRow||'—')+'</td><td class="name">'+esc(Array.from(notes).join(' · '))+'</td></tr>';
     }).join('');
     return '<div class="report-table-wrap"><table class="report-table"><thead><tr><th rowspan="2">№</th><th rowspan="2" class="name">ФИ студента</th><th colspan="31">Числа месяца</th><th rowspan="2">Итог</th><th colspan="2">Из них по причинам</th><th rowspan="2">Примечание</th></tr><tr>'+Array.from({length:31},function(_,i){var d=i+1,sun=d<=days&&dayOfWeek(month,d)===0;return '<th class="'+(sun?'sun':'')+'">'+d+'</th>';}).join('')+'<th>ува-жит</th><th>не-ув</th></tr></thead><tbody>'+rows+'<tr><td colspan="2" class="name"><strong>ИТОГО</strong></td>'+Array(31).fill('<td></td>').join('')+'<td class="total">'+(grand||'—')+'</td><td class="total">'+(ok||'—')+'</td><td class="total">'+(bad||'—')+'</td><td></td></tr></tbody></table></div>';
   }
   function renderReport() {
     var m=state.reportMonth,s=reportSummary(m), prior=state.reports.filter(function(r){return r.monthKey!==m;}).sort(function(a,b){return String(b.generatedAt).localeCompare(String(a.generatedAt));}).slice(0,8);
-    return '<div class="page-card"><h3>Ведомость за '+esc(monthTitle(m))+'</h3><p>Итоги считаются из дневных отметок. Никакие старые итоговые числа из Word не переносятся в новый документ.</p><div class="month-row"><button class="btn small" data-action="month-shift" data-kind="report" data-by="-1">‹</button><div class="month-caption">'+esc(monthTitle(m))+'</div><button class="btn small" data-action="month-shift" data-kind="report" data-by="1">›</button><input id="reportMonthInput" type="month" value="'+esc(m)+'"></div><div class="stats mini"><div class="stat"><div class="n">'+s.total+'</div><div class="l">всего часов</div></div><div class="stat"><div class="n">'+s.ok+'</div><div class="l">уважительных</div></div><div class="stat"><div class="n">'+s.bad+'</div><div class="l">неуважительных</div></div></div><div class="toolbar"><button class="btn primary" data-action="generate-report">📄 Сформировать Word</button><button class="btn" data-action="generate-multi-report">🍽 Многодетные</button><button class="btn" data-action="screen" data-screen="history">Открыть историю</button></div></div>'+exportReadyHtml()+renderReportTable(m)+'<div class="section-title"><h2>Последние ведомости</h2></div><div class="page-card">'+(prior.length ? prior.map(function(r){return '<div class="history-row"><div class="history-main"><div class="history-title">'+esc(monthTitle(r.monthKey))+'</div><div class="history-sub">Создана '+esc(new Date(r.generatedAt).toLocaleString('ru-RU'))+'</div></div><button class="btn small" data-action="regenerate" data-month="'+esc(r.monthKey)+'">Word</button></div>';}).join('') : '<div class="empty">Здесь будут последние сформированные ведомости.</div>')+'</div>';
+    return '<div class="page-card"><h3>Ведомость за '+esc(monthTitle(m))+'</h3><div class="month-row"><button class="btn small" data-action="month-shift" data-kind="report" data-by="-1">‹</button><div class="month-caption">'+esc(monthTitle(m))+'</div><button class="btn small" data-action="month-shift" data-kind="report" data-by="1">›</button><input id="reportMonthInput" type="month" value="'+esc(m)+'"></div><div class="stats mini"><div class="stat"><div class="n">'+s.total+'</div><div class="l">всего часов</div></div><div class="stat"><div class="n">'+s.ok+'</div><div class="l">уважительных</div></div><div class="stat"><div class="n">'+s.bad+'</div><div class="l">неуважительных</div></div></div><div class="toolbar"><button class="btn primary" data-action="generate-report">Сформировать Word</button><button class="btn" data-action="generate-multi-report">Многодетные</button><button class="btn" data-action="screen" data-screen="history">Открыть историю</button></div></div>'+exportReadyHtml()+renderReportTable(m)+'<div class="section-title"><h2>Последние ведомости</h2></div><div class="page-card">'+(prior.length ? prior.map(function(r){return '<div class="history-row"><div class="history-main"><div class="history-title">'+esc(monthTitle(r.monthKey))+'</div><div class="history-sub">Создана '+esc(new Date(r.generatedAt).toLocaleString('ru-RU'))+'</div></div><button class="btn small" data-action="regenerate" data-month="'+esc(r.monthKey)+'">Word</button></div>';}).join('') : '<div class="empty">Здесь будут последние сформированные ведомости.</div>')+'</div>';
   }
   function renderHistory() {
     var records=state.absences.filter(function(a){
       var inPeriod=state.historyMode==='day' ? a.date===state.historyDay : a.date.indexOf(state.historyMonth+'-')===0;
       if(!inPeriod || (state.historyStudentId!=='all' && a.studentId!==state.historyStudentId)) return false;
       if(state.historyMode==='subject' && state.historySubjectName!=='all') return absencePairsForSubject(a,a.date,state.historySubjectName).length>0;
-      if(state.historyMode==='pair' && state.historyPair!=='all') return pairNumbersFromRecord(a).indexOf(Number(state.historyPair))>=0;
       return true;
     });
     records.sort(function(a,b){return a.date.localeCompare(b.date)||compareNames(studentName(a.studentId),studentName(b.studentId));});
-
     var controls='<div class="history-tabs"><button class="btn small '+(state.historyMode==='month'?'active':'')+'" data-action="history-mode" data-mode="month">По месяцу</button><button class="btn small '+(state.historyMode==='day'?'active':'')+'" data-action="history-mode" data-mode="day">По дню</button><button class="btn small '+(state.historyMode==='subject'?'active':'')+'" data-action="history-mode" data-mode="subject">По предмету</button></div>';
     var dateControls=state.historyMode==='day' ? '<div class="field"><label>День</label><input id="historyDayInput" type="date" value="'+esc(state.historyDay)+'"></div>' : '<div class="month-row"><button class="btn small" data-action="month-shift" data-kind="history" data-by="-1">‹</button><div class="month-caption">'+esc(monthTitle(state.historyMonth))+'</div><button class="btn small" data-action="month-shift" data-kind="history" data-by="1">›</button><input id="historyMonthInput" type="month" value="'+esc(state.historyMonth)+'"></div>';
-    var subjectControl=state.historyMode==='subject' ? '<div class="field"><label>Предмет</label><select id="historySubject"><option value="all">Все предметы</option>'+allHistorySubjectNames().map(function(name){return '<option value="'+esc(name)+'" '+(String(state.historySubjectName).toLocaleLowerCase()===String(name).toLocaleLowerCase()?'selected':'')+'>'+esc(name)+'</option>';}).join('')+'</select></div>' : '';
-    var pairControl=state.historyMode==='pair' ? '<div class="field"><label>Номер пары</label><select id="historyPair"><option value="all">Все пары</option>'+allHistoryPairNumbers().map(function(n){return '<option value="'+n+'" '+(String(state.historyPair)===String(n)?'selected':'')+'>'+esc(pairLabel(n))+'</option>';}).join('')+'</select></div>' : '';
-
+    var studentControl='<div class="field"><label>Студент</label><select id="historyStudent"><option value="all">Все студенты</option>'+state.students.map(function(s){return '<option value="'+esc(s.id)+'" '+(state.historyStudentId===s.id?'selected':'')+'>'+esc(s.name)+'</option>';}).join('')+'</select></div>';
     if(state.historyMode==='subject'){
-      var subjectName=state.historySubjectName==='all' ? null : state.historySubjectName;
-      var subjectDates=[];
-      if(subjectName){
-        var month=state.historyMonth, days=daysInMonth(month);
-        for(var day=1;day<=days;day++){
-          var date=month+'-'+String(day).padStart(2,'0');
-          if(subjectPairsOnDate(date,subjectName).length) subjectDates.push(date);
-        }
-      }
+      var subjectControl='<div class="field"><label>Предмет</label><select id="historySubject"><option value="all">Все предметы</option>'+allHistorySubjectNames().map(function(name){return '<option value="'+esc(name)+'" '+(String(state.historySubjectName).toLocaleLowerCase()===String(name).toLocaleLowerCase()?'selected':'')+'>'+esc(name)+'</option>';}).join('')+'</select></div>';
+      var subjectName=state.historySubjectName==='all'?null:state.historySubjectName, subjectDates=[];
+      if(subjectName){for(var day=1;day<=daysInMonth(state.historyMonth);day++){var date=state.historyMonth+'-'+String(day).padStart(2,'0');if(subjectPairsOnDate(date,subjectName).length)subjectDates.push(date);}}
       var subjectRows=subjectDates.map(function(date){
-        var matching=records.filter(function(a){return a.date===date && absencePairsForSubject(a,date,subjectName).length>0;});
+        var matching=records.filter(function(a){return a.date===date&&absencePairsForSubject(a,date,subjectName).length>0;});
         var students=matching.map(function(a){return {name:studentName(a.studentId),id:a.studentId,reason:reasonInfo(a.reason).label,pairs:absencePairsForSubject(a,date,subjectName)};}).sort(function(a,b){return compareNames(a.name,b.name);});
-        var content=students.length ? '<div class="history-subject-list">'+students.map(function(item){return '<div class="history-subject-student"><div><strong>'+esc(item.name)+'</strong><div class="history-sub">НБ · '+esc(item.pairs.map(function(n){return n+' пара';}).join(', '))+' · '+esc(item.reason)+'</div></div><button class="btn small" data-action="edit-record" data-student="'+esc(item.id)+'" data-date="'+esc(date)+'">Изменить</button></div>';}).join('')+'</div>' : '<div class="history-subject-none">НБ нет</div>';
+        var content=students.length?'<div class="history-subject-list">'+students.map(function(item){return '<div class="history-subject-student"><div><strong>'+esc(item.name)+'</strong><div class="history-sub">НБ · '+esc(item.pairs.map(function(n){return n+' пара';}).join(', '))+' · '+esc(item.reason)+'</div></div><button class="btn small" data-action="edit-record" data-student="'+esc(item.id)+'" data-date="'+esc(date)+'">Изменить</button></div>';}).join('')+'</div>':'<div class="history-subject-none">НБ нет</div>';
         return '<div class="history-subject-day"><div class="history-title">'+esc(shortDate(date))+'</div>'+content+'</div>';
       }).join('');
-      if(!subjectName) subjectRows='<div class="empty">Выбери предмет, чтобы увидеть список дат.</div>';
-      else if(!subjectDates.length) subjectRows='<div class="empty">В '+esc(monthTitle(state.historyMonth))+' этот предмет по расписанию не стоит.</div>';
-      return '<div class="page-card"><h3>История по предмету</h3><p>Для каждой даты показывается, кто отсутствовал на выбранном предмете. Если НБ нет — так и указано. Разовые замены учитываются.</p>'+controls+dateControls+subjectControl+'<div class="field"><label>Студент</label><select id="historyStudent"><option value="all">Все студенты</option>'+state.students.map(function(s){return '<option value="'+esc(s.id)+'" '+(state.historyStudentId===s.id?'selected':'')+'>'+esc(s.name)+'</option>';}).join('')+'</select></div></div><div class="page-card">'+subjectRows+'</div>';
+      if(!subjectName)subjectRows='<div class="empty">Выбери предмет, чтобы увидеть список дат.</div>'; else if(!subjectDates.length)subjectRows='<div class="empty">В '+esc(monthTitle(state.historyMonth))+' этот предмет по расписанию не стоит.</div>';
+      return '<div class="page-card"><h3>История по предмету</h3>'+controls+dateControls+subjectControl+studentControl+'</div><div class="page-card">'+subjectRows+'</div>';
     }
-
-    var countText=state.historyMode==='pair' ? 'Записи за '+monthTitle(state.historyMonth)+' по выбранной паре.' : 'Смотри историю как по месяцу, по конкретному дню или по названию предмета.';
-    var rows=[];
-    records.forEach(function(a){
-      var pairs=pairNumbersFromRecord(a);
-      var visiblePairs=state.historyMode==='pair'&&state.historyPair!=='all'?pairs.filter(function(n){return n===Number(state.historyPair);}):pairs;
-      visiblePairs.forEach(function(n){
-        var pairObj=activePairs().find(function(p){return p.number===n;});
-        var subject=pairObj ? actualSubjectLabel(a.date,pairObj.id) : 'Пара';
-        rows.push('<div class="history-row"><div class="history-date">'+esc(shortDate(a.date))+'</div><div class="history-main"><div class="history-title">'+esc(studentName(a.studentId))+' · '+esc(n+' пара')+'</div><div class="history-sub">НБ · 2 ч. · '+esc(subject)+' · '+esc(reasonInfo(a.reason).label)+'</div></div><button class="btn small" data-action="edit-record" data-student="'+esc(a.studentId)+'" data-date="'+esc(a.date)+'">Изменить</button></div>');
-      });
-    });
-    return '<div class="page-card"><h3>История НБ</h3><p>'+esc(countText)+'</p>'+controls+dateControls+pairControl+'<div class="field"><label>Студент</label><select id="historyStudent"><option value="all">Все студенты</option>'+state.students.map(function(s){return '<option value="'+esc(s.id)+'" '+(state.historyStudentId===s.id?'selected':'')+'>'+esc(s.name)+'</option>';}).join('')+'</select></div></div><div class="page-card">'+(rows.length?rows.join(''):'<div class="empty">За выбранный период записей нет.</div>')+'</div>';
-  }
-  function renderGroup() {
-    var g=state.group;
-    return '<div class="page-card"><h3>Данные ведомости</h3><p>Эти сведения автоматически попадут в Word.</p><div class="form-grid"><div class="field full"><label>Учреждение</label><input id="gInstitution" value="'+esc(g.institution)+'"></div><div class="field"><label>Короткое название</label><input id="gInstitutionShort" value="'+esc(g.institutionShort)+'"></div><div class="field"><label>Группа</label><input id="gGroup" value="'+esc(g.group)+'"></div><div class="field full"><label>Специальность</label><input id="gSpecialty" value="'+esc(g.specialty)+'"></div><div class="field"><label>Классный руководитель</label><input id="gCurator" value="'+esc(g.curator)+'"></div><div class="field"><label>Староста</label><input id="gLeader" value="'+esc(g.groupLeader)+'"></div></div><div class="toolbar"><button class="btn primary" data-action="save-group">Сохранить данные группы</button></div></div><div class="page-card"><h3>Студенты · '+state.students.length+'</h3><p>Список всегда сортируется по алфавиту. При переименовании ID студента сохраняется, поэтому история не пропадает.</p><div class="student-list management-list">'+state.students.map(function(s,i){return '<div class="student-card"><div class="student-main"><div class="student-name">'+(i+1)+'. '+esc(s.name)+'</div><div class="student-meta">'+(s.multiChild?'✓ Многодетный':'Обычный статус')+'</div></div><button class="btn small" data-action="edit-student" data-student="'+esc(s.id)+'">Изменить</button><button class="btn small danger" data-action="delete-student" data-student="'+esc(s.id)+'">Удалить</button></div>';}).join('')+'</div><div class="toolbar"><button class="btn primary" data-action="new-student">＋ Добавить студента</button></div></div><div class="page-card"><h3>Загрузить список целиком</h3><p>Вставь ФИО по одному в строке. Номера «1.» автоматически убираются. После загрузки список сортируется.</p><div class="field"><textarea id="bulkNames" placeholder="1. Иванов И.И.\n2. Петров П.П.\n3. ...">'+esc(state.bulkNames)+'</textarea></div><div class="toolbar"><button class="btn" data-action="bulk-load">Загрузить список</button><button class="btn ghost" data-action="restore-template">Вернуть 25 ФИО из шаблона</button></div></div>';
-  }
-  function renderBackup() {
-    var size=(new Blob([JSON.stringify(snapshot())]).size/1024).toFixed(1);
-    return '<div class="page-card"><h3>Резервная копия</h3><p>В backup входят группа, весь список студентов, вся история НБ за все годы, отчёты, пары и расписание.</p><div class="toolbar"><button class="btn primary" data-action="export-backup">⬇ Создать backup</button><button class="btn" data-action="import-backup">⬆ Восстановить backup</button></div><div class="footer-note">Размер текущих данных примерно '+size+' КБ. После создания файла его можно сохранить в «Файлы» на iPhone.</div></div>'+exportReadyHtml()+'<div class="page-card"><h3>Надёжность хранения</h3><p>Основное хранилище — IndexedDB. Дополнительно приложение держит локальную копию состояния и запрашивает persistent storage, когда браузер это поддерживает. Backup остаётся отдельной независимой копией.</p></div>';
+    var rows=records.map(function(a){var status=a.reason==='none'?'Неув.':(a.confirmed?'Уваж.':'Ожидает подтверждения');return '<div class="history-row"><div class="history-date">'+esc(shortDate(a.date))+'</div><div class="history-main"><div class="history-title">'+esc(studentName(a.studentId))+'</div><div class="history-sub">'+esc(a.hours+' ч. · '+status)+'</div></div><button class="btn small" data-action="edit-record" data-student="'+esc(a.studentId)+'" data-date="'+esc(a.date)+'">Изменить</button></div>';}).join('');
+    var addPanel=state.historyMode==='month' ? '<div class="history-add-box"><div><strong>Добавить задним числом</strong><span>Выбери период. Пары подставятся по расписанию каждого дня.</span></div><button class="btn primary" data-action="history-add-month">Добавить</button></div>' : '<div class="history-add-box"><div><strong>Добавить НБ за день</strong><span>Выбери студента и пропущенные пары.</span></div><button class="btn primary" data-action="history-add-day">Добавить</button></div>';
+    var continuation='';
+    if(state.historyMode==='month') continuation='<div class="page-card"><h3>Продолжение болезни</h3><p>Отметь студентов, которые продолжают болеть после окончания месяца.</p><div class="continuation-list">'+state.students.map(function(s){var on=isContinuation(state.historyMonth,s.id);return '<div class="continuation-row"><span>'+esc(s.name)+'</span><button class="btn small '+(on?'active':'')+'" data-action="toggle-continuation" data-student="'+esc(s.id)+'">'+(on?'Прод. бол.':'Отметить')+'</button></div>';}).join('')+'</div></div>';
+    return '<div class="page-card"><h3>История НБ</h3>'+controls+dateControls+studentControl+addPanel+'</div>'+(state.historyMode==='month'?continuation:'')+'<div class="page-card">'+(rows||'<div class="empty">За выбранный период записей нет.</div>')+'</div>';
   }
   function renderSchedule() {
     var pairs=activePairs(), weekPairs=weeklyPairs(), subjects=state.schedule.subjects;
@@ -618,24 +638,29 @@
   }
   function renderSettings() {
     var size=(new Blob([JSON.stringify(snapshot())]).size/1024).toFixed(1);
-    return '<div class="page-card"><h3>Внешний вид</h3><div class="field"><label>Тема</label><select id="themeSelect"><option value="light" '+(state.settings.theme==='light'?'selected':'')+'>Светлая</option><option value="dark" '+(state.settings.theme==='dark'?'selected':'')+'>Тёмная</option><option value="system" '+(state.settings.theme==='system'?'selected':'')+'>Как в системе</option></select></div><p class="theme-note">Тёмная тема переработана для текста, полей, таблиц, кнопок и окон.</p></div><div class="page-card"><h3>Резервная копия</h3><p>В backup входят группа, студенты, отметки НБ, история, отчёты и расписание.</p><div class="toolbar"><button class="btn primary" data-action="export-backup">⬇ Создать backup</button><button class="btn" data-action="import-backup">⬆ Восстановить backup</button></div><div class="footer-note">Размер текущих данных примерно '+size+' КБ.</div></div><div class="page-card"><h3>Установка на iPhone</h3><p>Открой приложение в Safari → Поделиться → «На экран Домой» → «Открыть как веб‑приложение» → Добавить.</p><div class="toolbar"><button class="btn" data-action="show-install">Показать инструкцию</button></div></div><div class="page-card"><h3>О приложении</h3><p>Версия '+APP_VERSION+'. PWA без аккаунтов и без сервера для хранения посещаемости.</p></div>';
+    return '<div class="page-card"><h3>Внешний вид</h3><div class="field"><label>Тема</label><select id="themeSelect"><option value="light" '+(state.settings.theme==='light'?'selected':'')+'>Светлая</option><option value="dark" '+(state.settings.theme==='dark'?'selected':'')+'>Тёмная</option><option value="system" '+(state.settings.theme==='system'?'selected':'')+'>Как в системе</option></select></div><p class="theme-note">Выбери режим оформления.</p></div><div class="page-card"><h3>Резервная копия</h3><p>В backup входят группа, студенты, отметки НБ, история, отчёты и расписание.</p><div class="toolbar"><button class="btn primary" data-action="export-backup">Создать backup</button><button class="btn" data-action="import-backup">Восстановить backup</button></div><div class="footer-note">Размер текущих данных примерно '+size+' КБ.</div></div><div class="page-card"><h3>Установка на iPhone</h3><p>Открой приложение в Safari → Поделиться → «На экран Домой» → «Открыть как веб‑приложение» → Добавить.</p><div class="toolbar"><button class="btn" data-action="show-install">Показать инструкцию</button></div></div><div class="page-card"><h3>О приложении</h3><p>Версия '+APP_VERSION+'.</p></div>';
   }
   function renderDrawer() {
-    var items=[['home','🏠','Сегодня'],['report','📄','Ведомость'],['history','🕘','История'],['schedule','📅','Расписание'],['group','👥','Группа'],['settings','⚙️','Настройки']];
+    var items=[['home','⌂','Сегодня'],['report','№','Ведомость'],['history','↺','История'],['schedule','≡','Расписание'],['group','§','Группа'],['settings','⚙','Настройки']];
     return '<div class="drawer" data-action="close-menu"><aside class="drawer-panel" data-stop="1"><div class="drawer-brand">Посещаемость</div><div class="drawer-caption">'+esc(state.group.group)+' · офлайн</div><div class="menu-list">'+items.map(function(item){return '<button class="menu-item '+(state.screen===item[0]?'active':'')+'" data-action="screen" data-screen="'+item[0]+'"><span class="menu-icon">'+item[1]+'</span><span>'+item[2]+'</span></button>';}).join('')+'</div><div class="drawer-foot">Староста отмечает только НБ. Ведомость и итоги формирует приложение.</div></aside></div>';
   }
   function renderModal() {
     if (!state.modal) return '';
     var m=state.modal;
+    if(m.type==='history-add'){
+      var addPairs=activePairs().filter(function(p){return attendancePairsForDate(m.date,null).indexOf(p.number)>=0;});
+      var addPairChoices=addPairs.map(function(p){var active=(m.pairs||[]).indexOf(p.number)>=0;return '<button class="pair-choice '+(active?'active':'')+'" data-action="history-add-toggle-pair" data-pair="'+p.number+'"><span class="pair-number">'+p.number+'</span><span><strong>'+esc(p.number+' пара')+'</strong><small>'+esc(actualSubjectLabel(m.date,p.id))+'</small></span></button>';}).join('');
+      return '<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>Добавить НБ</h3><button class="modal-close" data-action="close-modal">✕</button></div><div class="field"><label>Студент</label><select id="historyAddStudent">'+state.students.map(function(s){return '<option value="'+esc(s.id)+'" '+(m.studentId===s.id?'selected':'')+'>'+esc(s.name)+'</option>';}).join('')+'</select></div>'+(m.mode==='month'?'<div class="form-grid"><div class="field"><label>С даты</label><input id="historyAddStart" type="date" value="'+esc(m.startDate)+'"></div><div class="field"><label>По дату</label><input id="historyAddEnd" type="date" value="'+esc(m.endDate)+'"></div></div>':'<div class="field"><label>Дата</label><div class="readonly-date">'+esc(formatDate(m.date))+'</div></div>')+'<div class="field"><label>Пары</label><div class="pair-choice-grid">'+addPairChoices+'</div><div class="toolbar"><button class="btn small" data-action="history-add-all">Весь день</button><button class="btn small ghost" data-action="history-add-clear">Снять все</button></div></div><div class="field"><label>Причина</label><select id="historyAddReason"><option value="none" '+(m.reason==='none'?'selected':'')+'>Без причины</option><option value="family" '+(m.reason==='family'?'selected':'')+'>Семейные обстоятельства</option><option value="sick" '+(m.reason==='sick'?'selected':'')+'>Болезнь</option><option value="order" '+(m.reason==='order'?'selected':'')+'>Распоряжение</option></select></div><label class="toggle-line confirmation-line" '+(m.reason==='none'?'style="display:none"':'')+'><input id="historyAddConfirmed" type="checkbox" '+(m.confirmed?'checked':'')+'> <span><strong>Подтверждено</strong></span></label><div class="modal-actions sticky-actions"><button class="btn ghost" data-action="close-modal">Отмена</button><button class="btn primary save-main" data-action="save-history-add">Сохранить</button></div></div></div>';
+    }
     if(m.type==='student') return '<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>'+ (m.studentId?'Изменить студента':'Новый студент') +'</h3><button class="modal-close" data-action="close-modal">✕</button></div><div class="field"><label>ФИО</label><input id="studentNameInput" value="'+esc(m.name)+'" autocomplete="off"></div><label class="toggle-line"><input id="studentMultiChild" type="checkbox" '+(m.multiChild?'checked':'')+'> <span><strong>Многодетный</strong><small>Учитывать в специальной ведомости питания</small></span></label><div class="modal-actions sticky-actions"><button class="btn ghost" data-action="close-modal">Отмена</button><button class="btn primary save-main" data-action="save-student">Сохранить</button></div></div></div>';
     var record=currentRecord(m.studentId,m.date), existing=!!record, pairs=activePairs().filter(function(p){ return attendancePairsForDate(m.date,record).indexOf(p.number)>=0; }), scheduled=scheduledPairNumbers(m.date), selected=new Set((m.pairs||[]).map(Number));
     var pairChoices=pairs.map(function(p){var active=selected.has(p.number);var sub=[p.start&&p.end?p.start+'–'+p.end:'',actualSubjectLabel(m.date,p.id)].filter(Boolean).join(' · ');return '<button class="pair-choice '+(active?'active':'')+'" data-action="toggle-pair" data-pair="'+esc(p.number)+'"><span class="pair-number">'+esc(p.number)+'</span><span><strong>'+esc(p.number+' пара')+'</strong><small>'+esc(sub||'НБ за эту пару')+'</small></span></button>';}).join('');
     var pairHint=scheduled.length ? '' : '<div class="empty">На эту дату по расписанию занятий нет.</div>';
-    return '<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>'+esc(studentName(m.studentId))+'</h3><button class="modal-close" data-action="close-modal">✕</button></div><div class="field"><label>Дата</label><input id="attendanceDate" type="date" value="'+esc(m.date)+'"></div><div class="field"><label>Пропущенные пары · '+esc(hoursFromPairs(m.pairs||[]))+' ч.</label>'+pairHint+'<div class="pair-choice-grid">'+pairChoices+'</div><div class="toolbar"><button class="btn small" data-action="select-all-pairs">Весь день</button><button class="btn small ghost" data-action="clear-pairs">Снять все</button></div></div><div class="field"><label>Причина</label><div class="reason-grid"><button class="reason '+(m.reason==='family'?'active':'')+'" data-action="set-reason" data-reason="family"><strong>С</strong><span>Семейные обстоятельства</span></button><button class="reason '+(m.reason==='sick'?'active':'')+'" data-action="set-reason" data-reason="sick"><strong>Б</strong><span>Болезнь</span></button><button class="reason '+(m.reason==='order'?'active':'')+'" data-action="set-reason" data-reason="order"><strong>Р</strong><span>Распоряжение</span></button><button class="reason reason-none '+(m.reason==='none'?'active':'')+'" data-action="set-reason" data-reason="none"><strong>Неув</strong><span>Без причины</span></button></div></div><div class="modal-actions sticky-actions">'+(existing?'<button class="btn danger" data-action="remove-attendance">Снять НБ</button>':'')+'<button class="btn primary" data-action="save-attendance">'+((m.pairs||[]).length?'Сохранить НБ':'Сохранить')+'</button></div></div></div>';
+    return '<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>'+esc(studentName(m.studentId))+'</h3><button class="modal-close" data-action="close-modal">✕</button></div><div class="field"><label>Дата</label><div class="readonly-date">'+esc(formatDate(m.date))+'</div></div><div class="field"><label>Пропущенные пары · '+esc(hoursFromPairs(m.pairs||[]))+' ч.</label>'+pairHint+'<div class="pair-choice-grid">'+pairChoices+'</div><div class="toolbar"><button class="btn small" data-action="select-all-pairs">Весь день</button><button class="btn small ghost" data-action="clear-pairs">Снять все</button></div></div><div class="field"><label>Причина</label><div class="reason-grid"><button class="reason '+(m.reason==='family'?'active':'')+'" data-action="set-reason" data-reason="family"><span>Семейные обстоятельства</span></button><button class="reason '+(m.reason==='sick'?'active':'')+'" data-action="set-reason" data-reason="sick"><span>Болезнь</span></button><button class="reason '+(m.reason==='order'?'active':'')+'" data-action="set-reason" data-reason="order"><strong>Р</strong><span>Распоряжение</span></button><button class="reason reason-none '+(m.reason==='none'?'active':'')+'" data-action="set-reason" data-reason="none"><strong>Неув</strong><span>Без причины</span></button></div></div><label class="toggle-line confirmation-line" '+(m.reason==='none'?'style="display:none"':'')+'><input id="attendanceConfirmed" type="checkbox" '+(m.confirmed?'checked':'')+'> <span><strong>Подтверждено</strong><small>После подтверждения часы считаются уважительными.</small></span></label><div class="modal-actions sticky-actions">'+(existing?'<button class="btn danger" data-action="remove-attendance">Снять НБ</button>':'')+'<button class="btn primary" data-action="save-attendance">'+((m.pairs||[]).length?'Сохранить НБ':'Сохранить')+'</button></div></div></div>';
   }
   function renderApp() {
     var body=state.screen==='home'?renderHome():state.screen==='report'?renderReport():state.screen==='history'?renderHistory():state.screen==='schedule'?renderSchedule():state.screen==='group'?renderGroup():state.screen==='backup'?renderBackup():renderSettings();
-    return topbar(titleForScreen(),subtitleForScreen())+'<main class="app-shell"><div class="content">'+body+'<div class="footer-note">AttendanceJournal хранит данные локально. Регулярно делай backup.</div></div></main>'+(state.drawer?renderDrawer():'')+(state.modal?renderModal():'');
+    return topbar(titleForScreen(),subtitleForScreen())+'<main class="app-shell"><div class="content">'+body+'</div></main>'+(state.drawer?renderDrawer():'')+(state.modal?renderModal():'');
   }
 
   document.addEventListener('click', function(event){
@@ -651,8 +676,8 @@
     if(action==='toggle-pair'){if(state.modal){var n=Number(el.dataset.pair), set=new Set(state.modal.pairs||[]);if(set.has(n))set.delete(n);else set.add(n);state.modal.pairs=Array.from(set).sort(function(a,b){return a-b;});state.modal.hours=hoursFromPairs(state.modal.pairs);render();}return;}
     if(action==='select-all-pairs'){if(state.modal){state.modal.pairs=scheduledPairNumbers(state.modal.date);state.modal.hours=hoursFromPairs(state.modal.pairs);render();}return;}
     if(action==='clear-pairs'){if(state.modal){state.modal.pairs=[];state.modal.hours=0;render();}return;}
-    if(action==='set-reason'){if(state.modal){state.modal.reason=el.dataset.reason;if(['family','sick','order'].indexOf(el.dataset.reason)>=0){state.modal.pairs=scheduledPairNumbers(state.modal.date);state.modal.hours=hoursFromPairs(state.modal.pairs);}render();}return;}
-    if(action==='save-attendance'){saveAttendance();return;}
+    if(action==='set-reason'){if(state.modal){state.modal.reason=el.dataset.reason;if(el.dataset.reason==='none')state.modal.confirmed=false;if(['family','sick','order'].indexOf(el.dataset.reason)>=0){state.modal.pairs=scheduledPairNumbers(state.modal.date);state.modal.hours=hoursFromPairs(state.modal.pairs);}render();}return;}
+    if(action==='history-add-month'){openHistoryAdd('month',state.historyMonth+'-01');return;} if(action==='history-add-day'){openHistoryAdd('day',state.historyDay);return;} if(action==='save-history-add'){saveHistoryAdd();return;} if(action==='history-add-toggle-pair'){if(state.modal){var hp=Number(el.dataset.pair),hs=new Set(state.modal.pairs||[]);if(hs.has(hp))hs.delete(hp);else hs.add(hp);state.modal.pairs=Array.from(hs).sort(function(a,b){return a-b;});render();}return;} if(action==='history-add-all'){if(state.modal){state.modal.pairs=scheduledPairNumbers(state.modal.date);render();}return;} if(action==='history-add-clear'){if(state.modal){state.modal.pairs=[];render();}return;} if(action==='toggle-continuation'){setContinuation(state.historyMonth,el.dataset.student,!isContinuation(state.historyMonth,el.dataset.student));return;} if(action==='history-edit-day'){state.historyMode='day';state.historyDay=el.dataset.date;state.historyMonth=String(el.dataset.date).slice(0,7);state.historyStudentId=el.dataset.student;render();return;} if(action==='save-attendance'){saveAttendance();return;}
     if(action==='remove-attendance'){removeAttendance();return;}
     if(action==='new-student'){state.modal={type:'student',studentId:null,name:'',multiChild:false};render();return;}
     if(action==='edit-student'){var s=state.students.find(function(x){return x.id===el.dataset.student;});if(s){state.modal={type:'student',studentId:s.id,name:s.name,multiChild:!!s.multiChild};render();}return;}
@@ -687,19 +712,18 @@
 
   document.addEventListener('input', function(event){
     if(event.target.id==='studentNameInput' && state.modal) state.modal.name=event.target.value;
-    if(event.target.id==='studentMultiChild' && state.modal) state.modal.multiChild=event.target.checked;
+    if(event.target.id==='studentMultiChild' && state.modal) state.modal.multiChild=event.target.checked; if(event.target.id==='attendanceConfirmed' && state.modal) state.modal.confirmed=event.target.checked; if(event.target.id==='historyAddConfirmed' && state.modal) state.modal.confirmed=event.target.checked;
     if(event.target.id==='bulkNames') state.bulkNames=event.target.value;
   });
   document.addEventListener('change', function(event){
     if(event.target.id==='reportMonthInput'){state.reportMonth=event.target.value;render();}
     if(event.target.id==='historyMonthInput'){state.historyMonth=event.target.value;render();}
     if(event.target.id==='historyStudent'){state.historyStudentId=event.target.value;render();}
-    if(event.target.id==='historyPair'){state.historyPair=event.target.value;render();}
-    if(event.target.id==='historySubject'){state.historySubjectName=event.target.value;render();}
+        if(event.target.id==='historySubject'){state.historySubjectName=event.target.value;render();}
     if(event.target.id==='scheduleDateInput'){state.scheduleDate=event.target.value||today();render();}
     if(event.target.id==='historyDayInput'){state.historyDay=event.target.value;state.historyMonth=String(event.target.value||'').slice(0,7);render();}
     if(event.target.id==='themeSelect'){state.settings.theme=event.target.value;persistNow();applyTheme();render();}
-    if(event.target.id==='attendanceDate' && state.modal){state.modal.date=event.target.value;var a=currentRecord(state.modal.studentId,state.modal.date);state.modal.hours=a?a.hours:0;state.modal.pairs=a?pairNumbersFromRecord(a):[];state.modal.periods=a?pairNumbersFromRecord(a):[];state.modal.reason=a?a.reason:'none';render();}
+    if(event.target.id==='historyAddStudent' && state.modal){state.modal.studentId=event.target.value;render();} if(event.target.id==='historyAddReason' && state.modal){state.modal.reason=event.target.value;if(state.modal.reason==='none')state.modal.confirmed=false;render();} if(event.target.id==='historyAddStart' && state.modal){state.modal.startDate=event.target.value;state.modal.date=event.target.value;render();} if(event.target.id==='historyAddEnd' && state.modal){state.modal.endDate=event.target.value;render();}
   });
   backupFile.addEventListener('change', function(){ if(backupFile.files && backupFile.files[0]) importBackup(backupFile.files[0]); });
 
