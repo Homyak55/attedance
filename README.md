@@ -100,8 +100,7 @@ python -m http.server 8080
 - `js/exporter.js` — работа с файлами;
 - `sw.js` — Service Worker;
 - `manifest.webmanifest` — параметры веб-приложения;
-- `config.json` — конфигурация проекта.
 
 ## Версия
 
-**V5.5.0**
+**V5.5.5**
